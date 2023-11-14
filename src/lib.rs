@@ -14,20 +14,20 @@ pub mod derived;
 
 /// An observable component that can only be accessed through the [`ReactiveContext`].
 #[derive(Component)]
-pub struct Obs<T: Send + Sync + 'static> {
+pub struct Obs<T: Send + Sync + PartialEq + 'static> {
     rctx_entity: Entity,
     p: PhantomData<T>,
 }
 
-impl<T: Send + Sync + 'static> Clone for Obs<T> {
+impl<T: Send + Sync + PartialEq + 'static> Clone for Obs<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Send + Sync + 'static> Copy for Obs<T> {}
+impl<T: Send + Sync + PartialEq + 'static> Copy for Obs<T> {}
 
-impl<T: Send + Sync + 'static> Obs<T> {
+impl<T: Send + Sync + PartialEq + 'static> Obs<T> {
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         &rctx
             .world
@@ -77,7 +77,7 @@ pub struct ReactiveContext {
 
 impl ReactiveContext {
     /// Returns a reference to the current value of the provided observable.
-    pub fn read<T: Send + Sync + 'static>(&mut self, observable: Obs<T>) -> &T {
+    pub fn read<T: Send + Sync + PartialEq + 'static>(&mut self, observable: Obs<T>) -> &T {
         // get the obs data from the world
         // add the reader to the obs data's subs
         &self
@@ -90,11 +90,18 @@ impl ReactiveContext {
     /// Potentially expensive operation that will write a value to this observable, or "signal".
     /// This will cause all reactive subscribers of this observable to recompute their own values,
     /// which can cause all of its subscribers to recompute, etc.
-    pub fn write_and_react<T: Send + Sync + 'static>(&mut self, observable: Obs<T>, value: T) {
+    pub fn write_and_react<T: Send + Sync + PartialEq + 'static>(
+        &mut self,
+        observable: Obs<T>,
+        value: T,
+    ) {
         observable.write_and_react(self, value);
     }
 
-    pub fn add_observable<T: Send + Sync + 'static>(&mut self, initial_value: T) -> Obs<T> {
+    pub fn add_observable<T: Send + Sync + PartialEq + 'static>(
+        &mut self,
+        initial_value: T,
+    ) -> Obs<T> {
         let rctx_entity = self
             .world
             .spawn(Observable {
@@ -108,7 +115,7 @@ impl ReactiveContext {
         }
     }
 
-    pub fn add_derived<C: Send + Sync + 'static, D: Derivable<C> + 'static>(
+    pub fn add_derived<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         &mut self,
         input_deps: D,
         derive_fn: fn(D::Query<'_>) -> C,

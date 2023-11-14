@@ -9,11 +9,14 @@ pub(crate) struct Derived {
     function: Box<dyn DeriveFn>,
 }
 
+pub(crate) trait ObservableData: Send + Sync + PartialEq + 'static {}
+impl<T: Send + Sync + PartialEq + 'static> ObservableData for T {}
+
 trait DeriveFn: Send + Sync + 'static + FnMut(&mut World) {}
 impl<T: Send + Sync + 'static + FnMut(&mut World)> DeriveFn for T {}
 
 impl Derived {
-    pub(crate) fn new<C: Send + Sync + 'static, D: Derivable<C> + 'static>(
+    pub(crate) fn new<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         derived: Entity,
         input_deps: D,
         derive_fn: fn(D::Query<'_>) -> C,
@@ -35,13 +38,20 @@ impl Derived {
 
 /// Write observable data to the supplied entity. The [`Observable`] component will be added if it
 /// is missing.
-pub fn write_observable<T: Send + Sync + 'static>(world: &mut World, entity: Entity, value: T) {
+pub fn write_observable<T: Send + Sync + PartialEq + 'static>(
+    world: &mut World,
+    entity: Entity,
+    value: T,
+) {
     // the reader must have a way to update itself when the subscription is invoked
     // the obs may be a button, but the reader may be a door, need to get around type issues?
     // maybe the type erased thing being invoked is a one shot system
     // can we stick the closure inside a system?
 
     if let Some(mut obs) = world.get_mut::<Observable<T>>(entity) {
+        if obs.data == value {
+            return;
+        }
         obs.data = value;
         let mut subscribers = std::mem::take(&mut obs.subscribers);
         for sub in subscribers.drain() {
@@ -69,7 +79,7 @@ pub trait Derivable<T>: Copy + Send + Sync + 'static {
     ) -> T;
 }
 
-impl<A: Send + Sync + 'static, T> Derivable<T> for Obs<A> {
+impl<A: ObservableData, T> Derivable<T> for Obs<A> {
     type Query<'a> = &'a A;
 
     fn read_and_derive(
@@ -91,7 +101,7 @@ impl<A: Send + Sync + 'static, T> Derivable<T> for Obs<A> {
     }
 }
 
-impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (Obs<A>, Obs<B>) {
+impl<A: ObservableData, B: ObservableData, T> Derivable<T> for (Obs<A>, Obs<B>) {
     type Query<'a> = (&'a A, &'a B);
 
     fn read_and_derive(
@@ -120,7 +130,7 @@ impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (Ob
     }
 }
 
-impl<A: Send + Sync + 'static, B: Send + Sync + 'static, C: Send + Sync + 'static, T> Derivable<T>
+impl<A: ObservableData, B: ObservableData, C: ObservableData, T> Derivable<T>
     for (Obs<A>, Obs<B>, Obs<C>)
 {
     type Query<'a> = (&'a A, &'a B, &'a C);
@@ -156,13 +166,8 @@ impl<A: Send + Sync + 'static, B: Send + Sync + 'static, C: Send + Sync + 'stati
     }
 }
 
-impl<
-        A: Send + Sync + 'static,
-        B: Send + Sync + 'static,
-        C: Send + Sync + 'static,
-        D: Send + Sync + 'static,
-        T,
-    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>)
+impl<A: ObservableData, B: ObservableData, C: ObservableData, D: ObservableData, T> Derivable<T>
+    for (Obs<A>, Obs<B>, Obs<C>, Obs<D>)
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D);
 
@@ -208,11 +213,11 @@ impl<
 }
 
 impl<
-        A: Send + Sync + 'static,
-        B: Send + Sync + 'static,
-        C: Send + Sync + 'static,
-        D: Send + Sync + 'static,
-        E: Send + Sync + 'static,
+        A: ObservableData,
+        B: ObservableData,
+        C: ObservableData,
+        D: ObservableData,
+        E: ObservableData,
         T,
     > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>)
 {
@@ -266,12 +271,12 @@ impl<
 }
 
 impl<
-        A: Send + Sync + 'static,
-        B: Send + Sync + 'static,
-        C: Send + Sync + 'static,
-        D: Send + Sync + 'static,
-        E: Send + Sync + 'static,
-        F: Send + Sync + 'static,
+        A: ObservableData,
+        B: ObservableData,
+        C: ObservableData,
+        D: ObservableData,
+        E: ObservableData,
+        F: ObservableData,
         T,
     > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>)
 {
@@ -332,13 +337,13 @@ impl<
 }
 
 impl<
-        A: Send + Sync + 'static,
-        B: Send + Sync + 'static,
-        C: Send + Sync + 'static,
-        D: Send + Sync + 'static,
-        E: Send + Sync + 'static,
-        F: Send + Sync + 'static,
-        G: Send + Sync + 'static,
+        A: ObservableData,
+        B: ObservableData,
+        C: ObservableData,
+        D: ObservableData,
+        E: ObservableData,
+        F: ObservableData,
+        G: ObservableData,
         T,
     > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>, Obs<G>)
 {
@@ -405,14 +410,14 @@ impl<
 }
 
 impl<
-        A: Send + Sync + 'static,
-        B: Send + Sync + 'static,
-        C: Send + Sync + 'static,
-        D: Send + Sync + 'static,
-        E: Send + Sync + 'static,
-        F: Send + Sync + 'static,
-        G: Send + Sync + 'static,
-        H: Send + Sync + 'static,
+        A: ObservableData,
+        B: ObservableData,
+        C: ObservableData,
+        D: ObservableData,
+        E: ObservableData,
+        F: ObservableData,
+        G: ObservableData,
+        H: ObservableData,
         T,
     > Derivable<T>
     for (
