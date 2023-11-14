@@ -15,7 +15,7 @@ impl<T: Send + Sync + 'static + FnMut(&mut World)> DeriveFn for T {}
 impl Derived {
     pub(crate) fn new<C: Send + Sync + 'static, D: Derivable<C> + 'static>(
         derived: Entity,
-        input_deps: D::Inputs,
+        input_deps: D,
         derive_fn: fn(D::Query<'_>) -> C,
     ) -> Self {
         let function = move |world: &mut World| {
@@ -59,27 +59,46 @@ pub fn write_observable<T: Send + Sync + 'static>(world: &mut World, entity: Ent
 
 /// A type that represents a collection of observables, which can be used to compute a derived
 /// value.
-pub trait Derivable<T> {
+pub trait Derivable<T>: Copy + Send + Sync + 'static {
     type Query<'a>;
-    type Inputs: Copy + Send + Sync + 'static;
     fn read_and_derive(
         world: &mut World,
         reader: Entity,
         derive_fn: fn(Self::Query<'_>) -> T,
-        input_deps: Self::Inputs,
+        input_deps: Self,
     ) -> T;
 }
 
-impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (A, B) {
-    type Query<'a> = (&'a A, &'a B);
-
-    type Inputs = (Obs<A>, Obs<B>);
+impl<A: Send + Sync + 'static, T> Derivable<T> for Obs<A> {
+    type Query<'a> = &'a A;
 
     fn read_and_derive(
         world: &mut World,
         reader: Entity,
         derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self::Inputs,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [e.rctx_entity];
+        let [mut a] = world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn(&a.get::<Observable<A>>().unwrap().data)
+    }
+}
+
+impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (Obs<A>, Obs<B>) {
+    type Query<'a> = (&'a A, &'a B);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
     ) -> T {
         let e = entities;
         let entities = [e.0.rctx_entity, e.1.rctx_entity];
@@ -89,7 +108,7 @@ impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (A,
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<A>>()
+        b.get_mut::<Observable<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
@@ -97,6 +116,290 @@ impl<A: Send + Sync + 'static, B: Send + Sync + 'static, T> Derivable<T> for (A,
         derive_fn((
             &a.get::<Observable<A>>().unwrap().data,
             &b.get::<Observable<B>>().unwrap().data,
+        ))
+    }
+}
+
+impl<A: Send + Sync + 'static, B: Send + Sync + 'static, C: Send + Sync + 'static, T> Derivable<T>
+    for (Obs<A>, Obs<B>, Obs<C>)
+{
+    type Query<'a> = (&'a A, &'a B, &'a C);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [e.0.rctx_entity, e.1.rctx_entity, e.2.rctx_entity];
+        let [mut a, mut b, mut c] = world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        b.get_mut::<Observable<B>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        c.get_mut::<Observable<C>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn((
+            &a.get::<Observable<A>>().unwrap().data,
+            &b.get::<Observable<B>>().unwrap().data,
+            &c.get::<Observable<C>>().unwrap().data,
+        ))
+    }
+}
+
+impl<
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        C: Send + Sync + 'static,
+        D: Send + Sync + 'static,
+        T,
+    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>)
+{
+    type Query<'a> = (&'a A, &'a B, &'a C, &'a D);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [
+            e.0.rctx_entity,
+            e.1.rctx_entity,
+            e.2.rctx_entity,
+            e.3.rctx_entity,
+        ];
+        let [mut a, mut b, mut c, mut d] = world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        b.get_mut::<Observable<B>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        c.get_mut::<Observable<C>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        d.get_mut::<Observable<D>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn((
+            &a.get::<Observable<A>>().unwrap().data,
+            &b.get::<Observable<B>>().unwrap().data,
+            &c.get::<Observable<C>>().unwrap().data,
+            &d.get::<Observable<D>>().unwrap().data,
+        ))
+    }
+}
+
+impl<
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        C: Send + Sync + 'static,
+        D: Send + Sync + 'static,
+        E: Send + Sync + 'static,
+        T,
+    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>)
+{
+    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [
+            e.0.rctx_entity,
+            e.1.rctx_entity,
+            e.2.rctx_entity,
+            e.3.rctx_entity,
+            e.4.rctx_entity,
+        ];
+        let [mut a, mut b, mut c, mut d, mut e] = world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        b.get_mut::<Observable<B>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        c.get_mut::<Observable<C>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        d.get_mut::<Observable<D>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        e.get_mut::<Observable<E>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn((
+            &a.get::<Observable<A>>().unwrap().data,
+            &b.get::<Observable<B>>().unwrap().data,
+            &c.get::<Observable<C>>().unwrap().data,
+            &d.get::<Observable<D>>().unwrap().data,
+            &e.get::<Observable<E>>().unwrap().data,
+        ))
+    }
+}
+
+impl<
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        C: Send + Sync + 'static,
+        D: Send + Sync + 'static,
+        E: Send + Sync + 'static,
+        F: Send + Sync + 'static,
+        T,
+    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>)
+{
+    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [
+            e.0.rctx_entity,
+            e.1.rctx_entity,
+            e.2.rctx_entity,
+            e.3.rctx_entity,
+            e.4.rctx_entity,
+            e.5.rctx_entity,
+        ];
+        let [mut a, mut b, mut c, mut d, mut e, mut f] =
+            world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        b.get_mut::<Observable<B>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        c.get_mut::<Observable<C>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        d.get_mut::<Observable<D>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        e.get_mut::<Observable<E>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        f.get_mut::<Observable<F>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn((
+            &a.get::<Observable<A>>().unwrap().data,
+            &b.get::<Observable<B>>().unwrap().data,
+            &c.get::<Observable<C>>().unwrap().data,
+            &d.get::<Observable<D>>().unwrap().data,
+            &e.get::<Observable<E>>().unwrap().data,
+            &f.get::<Observable<F>>().unwrap().data,
+        ))
+    }
+}
+
+impl<
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        C: Send + Sync + 'static,
+        D: Send + Sync + 'static,
+        E: Send + Sync + 'static,
+        F: Send + Sync + 'static,
+        G: Send + Sync + 'static,
+        T,
+    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>, Obs<G>)
+{
+    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G);
+
+    fn read_and_derive(
+        world: &mut World,
+        reader: Entity,
+        derive_fn: fn(Self::Query<'_>) -> T,
+        entities: Self,
+    ) -> T {
+        let e = entities;
+        let entities = [
+            e.0.rctx_entity,
+            e.1.rctx_entity,
+            e.2.rctx_entity,
+            e.3.rctx_entity,
+            e.4.rctx_entity,
+            e.5.rctx_entity,
+            e.6.rctx_entity,
+        ];
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g] =
+            world.get_many_entities_mut(entities).unwrap();
+
+        a.get_mut::<Observable<A>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        b.get_mut::<Observable<B>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        c.get_mut::<Observable<C>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        d.get_mut::<Observable<D>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        e.get_mut::<Observable<E>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        f.get_mut::<Observable<F>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+        g.get_mut::<Observable<G>>()
+            .unwrap()
+            .subscribers
+            .insert(reader);
+
+        derive_fn((
+            &a.get::<Observable<A>>().unwrap().data,
+            &b.get::<Observable<B>>().unwrap().data,
+            &c.get::<Observable<C>>().unwrap().data,
+            &d.get::<Observable<D>>().unwrap().data,
+            &e.get::<Observable<E>>().unwrap().data,
+            &f.get::<Observable<F>>().unwrap().data,
+            &g.get::<Observable<G>>().unwrap().data,
         ))
     }
 }
@@ -111,11 +414,8 @@ impl<
         G: Send + Sync + 'static,
         H: Send + Sync + 'static,
         T,
-    > Derivable<T> for (A, B, C, D, E, F, G, H)
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G, &'a H);
-
-    type Inputs = (
+    > Derivable<T>
+    for (
         Obs<A>,
         Obs<B>,
         Obs<C>,
@@ -124,13 +424,15 @@ impl<
         Obs<F>,
         Obs<G>,
         Obs<H>,
-    );
+    )
+{
+    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G, &'a H);
 
     fn read_and_derive(
         world: &mut World,
         reader: Entity,
         derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self::Inputs,
+        entities: Self,
     ) -> T {
         let e = entities;
         let entities = [

@@ -9,15 +9,23 @@ struct Lock {
     unlocked: bool,
 }
 
+impl Lock {
+    fn new(unlocked: bool) -> Self {
+        Self { unlocked }
+    }
+
+    fn compute_from_buttons(buttons: (&Button, &Button)) -> Self {
+        Self::new(buttons.0.active && buttons.1.active)
+    }
+}
+
 fn main() {
     let mut rctx = ReactiveContext::default();
 
     let button1 = rctx.add_observable(Button { active: false });
     let button2 = rctx.add_observable(Button { active: false });
 
-    let lock = rctx.add_derived::<Lock, (Button, Button)>((button1, button2), |(b1, b2)| Lock {
-        unlocked: b1.active && b2.active,
-    });
+    let lock = rctx.add_derived((button1, button2), Lock::compute_from_buttons);
 
     assert!(!lock.read(&mut rctx).unlocked);
 
@@ -26,9 +34,3 @@ fn main() {
 
     assert!(lock.read(&mut rctx).unlocked);
 }
-
-// fn recompute_lock(button: (&Button, &Button)) -> Lock {
-//     Lock {
-//         unlocked: button.0.active && button.1.active,
-//     }
-// }

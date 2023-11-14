@@ -110,7 +110,7 @@ impl ReactiveContext {
 
     pub fn add_derived<C: Send + Sync + 'static, D: Derivable<C> + 'static>(
         &mut self,
-        input_deps: D::Inputs,
+        input_deps: D,
         derive_fn: fn(D::Query<'_>) -> C,
     ) -> Der<C> {
         let entity = self.world.spawn_empty().id();
