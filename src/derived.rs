@@ -1,11 +1,11 @@
 use bevy_ecs::prelude::*;
 
-use crate::{Obs, Observable};
+use crate::{Signal, SignalData};
 
 /// Lives alongside the observable component. This holds a system that can be called without the
 /// caller knowing any type information, and will update the associated observable component.
 #[derive(Component)]
-pub(crate) struct Derived {
+pub(crate) struct DerivedData {
     function: Box<dyn DeriveFn>,
 }
 
@@ -15,7 +15,7 @@ impl<T: Send + Sync + PartialEq + 'static> ObservableData for T {}
 trait DeriveFn: Send + Sync + 'static + FnMut(&mut World) {}
 impl<T: Send + Sync + 'static + FnMut(&mut World)> DeriveFn for T {}
 
-impl Derived {
+impl DerivedData {
     pub(crate) fn new<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         derived: Entity,
         input_deps: D,
@@ -38,29 +38,25 @@ impl Derived {
 
 /// Write observable data to the supplied entity. The [`Observable`] component will be added if it
 /// is missing.
+#[inline]
 pub fn write_observable<T: Send + Sync + PartialEq + 'static>(
     world: &mut World,
     entity: Entity,
     value: T,
 ) {
-    // the reader must have a way to update itself when the subscription is invoked
-    // the obs may be a button, but the reader may be a door, need to get around type issues?
-    // maybe the type erased thing being invoked is a one shot system
-    // can we stick the closure inside a system?
-
-    if let Some(mut obs) = world.get_mut::<Observable<T>>(entity) {
+    if let Some(mut obs) = world.get_mut::<SignalData<T>>(entity) {
         if obs.data == value {
             return;
         }
         obs.data = value;
         let mut subscribers = std::mem::take(&mut obs.subscribers);
         for sub in subscribers.drain() {
-            let mut derived = world.entity_mut(sub).take::<Derived>().unwrap();
+            let mut derived = world.entity_mut(sub).take::<DerivedData>().unwrap();
             (derived.function)(world);
             world.entity_mut(sub).insert(derived);
         }
     } else {
-        world.entity_mut(entity).insert(Observable {
+        world.entity_mut(entity).insert(SignalData {
             data: value,
             subscribers: Default::default(),
         });
@@ -79,7 +75,7 @@ pub trait Derivable<T>: Copy + Send + Sync + 'static {
     ) -> T;
 }
 
-impl<A: ObservableData, T> Derivable<T> for Obs<A> {
+impl<A: ObservableData, T> Derivable<T> for Signal<A> {
     type Query<'a> = &'a A;
 
     fn read_and_derive(
@@ -89,19 +85,19 @@ impl<A: ObservableData, T> Derivable<T> for Obs<A> {
         entities: Self,
     ) -> T {
         let e = entities;
-        let entities = [e.rctx_entity];
+        let entities = [e.reactor_entity];
         let [mut a] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
-        derive_fn(&a.get::<Observable<A>>().unwrap().data)
+        derive_fn(&a.get::<SignalData<A>>().unwrap().data)
     }
 }
 
-impl<A: ObservableData, B: ObservableData, T> Derivable<T> for (Obs<A>, Obs<B>) {
+impl<A: ObservableData, B: ObservableData, T> Derivable<T> for (Signal<A>, Signal<B>) {
     type Query<'a> = (&'a A, &'a B);
 
     fn read_and_derive(
@@ -111,27 +107,27 @@ impl<A: ObservableData, B: ObservableData, T> Derivable<T> for (Obs<A>, Obs<B>) 
         entities: Self,
     ) -> T {
         let e = entities;
-        let entities = [e.0.rctx_entity, e.1.rctx_entity];
+        let entities = [e.0.reactor_entity, e.1.reactor_entity];
         let [mut a, mut b] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
         ))
     }
 }
 
 impl<A: ObservableData, B: ObservableData, C: ObservableData, T> Derivable<T>
-    for (Obs<A>, Obs<B>, Obs<C>)
+    for (Signal<A>, Signal<B>, Signal<C>)
 {
     type Query<'a> = (&'a A, &'a B, &'a C);
 
@@ -142,32 +138,32 @@ impl<A: ObservableData, B: ObservableData, C: ObservableData, T> Derivable<T>
         entities: Self,
     ) -> T {
         let e = entities;
-        let entities = [e.0.rctx_entity, e.1.rctx_entity, e.2.rctx_entity];
+        let entities = [e.0.reactor_entity, e.1.reactor_entity, e.2.reactor_entity];
         let [mut a, mut b, mut c] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
         ))
     }
 }
 
 impl<A: ObservableData, B: ObservableData, C: ObservableData, D: ObservableData, T> Derivable<T>
-    for (Obs<A>, Obs<B>, Obs<C>, Obs<D>)
+    for (Signal<A>, Signal<B>, Signal<C>, Signal<D>)
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D);
 
@@ -179,35 +175,35 @@ impl<A: ObservableData, B: ObservableData, C: ObservableData, D: ObservableData,
     ) -> T {
         let e = entities;
         let entities = [
-            e.0.rctx_entity,
-            e.1.rctx_entity,
-            e.2.rctx_entity,
-            e.3.rctx_entity,
+            e.0.reactor_entity,
+            e.1.reactor_entity,
+            e.2.reactor_entity,
+            e.3.reactor_entity,
         ];
         let [mut a, mut b, mut c, mut d] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        d.get_mut::<Observable<D>>()
+        d.get_mut::<SignalData<D>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
-            &d.get::<Observable<D>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
+            &d.get::<SignalData<D>>().unwrap().data,
         ))
     }
 }
@@ -219,7 +215,7 @@ impl<
         D: ObservableData,
         E: ObservableData,
         T,
-    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>)
+    > Derivable<T> for (Signal<A>, Signal<B>, Signal<C>, Signal<D>, Signal<E>)
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E);
 
@@ -231,41 +227,41 @@ impl<
     ) -> T {
         let e = entities;
         let entities = [
-            e.0.rctx_entity,
-            e.1.rctx_entity,
-            e.2.rctx_entity,
-            e.3.rctx_entity,
-            e.4.rctx_entity,
+            e.0.reactor_entity,
+            e.1.reactor_entity,
+            e.2.reactor_entity,
+            e.3.reactor_entity,
+            e.4.reactor_entity,
         ];
         let [mut a, mut b, mut c, mut d, mut e] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        d.get_mut::<Observable<D>>()
+        d.get_mut::<SignalData<D>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        e.get_mut::<Observable<E>>()
+        e.get_mut::<SignalData<E>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
-            &d.get::<Observable<D>>().unwrap().data,
-            &e.get::<Observable<E>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
+            &d.get::<SignalData<D>>().unwrap().data,
+            &e.get::<SignalData<E>>().unwrap().data,
         ))
     }
 }
@@ -278,7 +274,15 @@ impl<
         E: ObservableData,
         F: ObservableData,
         T,
-    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>)
+    > Derivable<T>
+    for (
+        Signal<A>,
+        Signal<B>,
+        Signal<C>,
+        Signal<D>,
+        Signal<E>,
+        Signal<F>,
+    )
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F);
 
@@ -290,48 +294,48 @@ impl<
     ) -> T {
         let e = entities;
         let entities = [
-            e.0.rctx_entity,
-            e.1.rctx_entity,
-            e.2.rctx_entity,
-            e.3.rctx_entity,
-            e.4.rctx_entity,
-            e.5.rctx_entity,
+            e.0.reactor_entity,
+            e.1.reactor_entity,
+            e.2.reactor_entity,
+            e.3.reactor_entity,
+            e.4.reactor_entity,
+            e.5.reactor_entity,
         ];
         let [mut a, mut b, mut c, mut d, mut e, mut f] =
             world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        d.get_mut::<Observable<D>>()
+        d.get_mut::<SignalData<D>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        e.get_mut::<Observable<E>>()
+        e.get_mut::<SignalData<E>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        f.get_mut::<Observable<F>>()
+        f.get_mut::<SignalData<F>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
-            &d.get::<Observable<D>>().unwrap().data,
-            &e.get::<Observable<E>>().unwrap().data,
-            &f.get::<Observable<F>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
+            &d.get::<SignalData<D>>().unwrap().data,
+            &e.get::<SignalData<E>>().unwrap().data,
+            &f.get::<SignalData<F>>().unwrap().data,
         ))
     }
 }
@@ -345,7 +349,16 @@ impl<
         F: ObservableData,
         G: ObservableData,
         T,
-    > Derivable<T> for (Obs<A>, Obs<B>, Obs<C>, Obs<D>, Obs<E>, Obs<F>, Obs<G>)
+    > Derivable<T>
+    for (
+        Signal<A>,
+        Signal<B>,
+        Signal<C>,
+        Signal<D>,
+        Signal<E>,
+        Signal<F>,
+        Signal<G>,
+    )
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G);
 
@@ -357,54 +370,54 @@ impl<
     ) -> T {
         let e = entities;
         let entities = [
-            e.0.rctx_entity,
-            e.1.rctx_entity,
-            e.2.rctx_entity,
-            e.3.rctx_entity,
-            e.4.rctx_entity,
-            e.5.rctx_entity,
-            e.6.rctx_entity,
+            e.0.reactor_entity,
+            e.1.reactor_entity,
+            e.2.reactor_entity,
+            e.3.reactor_entity,
+            e.4.reactor_entity,
+            e.5.reactor_entity,
+            e.6.reactor_entity,
         ];
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g] =
             world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        d.get_mut::<Observable<D>>()
+        d.get_mut::<SignalData<D>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        e.get_mut::<Observable<E>>()
+        e.get_mut::<SignalData<E>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        f.get_mut::<Observable<F>>()
+        f.get_mut::<SignalData<F>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        g.get_mut::<Observable<G>>()
+        g.get_mut::<SignalData<G>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
-            &d.get::<Observable<D>>().unwrap().data,
-            &e.get::<Observable<E>>().unwrap().data,
-            &f.get::<Observable<F>>().unwrap().data,
-            &g.get::<Observable<G>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
+            &d.get::<SignalData<D>>().unwrap().data,
+            &e.get::<SignalData<E>>().unwrap().data,
+            &f.get::<SignalData<F>>().unwrap().data,
+            &g.get::<SignalData<G>>().unwrap().data,
         ))
     }
 }
@@ -421,14 +434,14 @@ impl<
         T,
     > Derivable<T>
     for (
-        Obs<A>,
-        Obs<B>,
-        Obs<C>,
-        Obs<D>,
-        Obs<E>,
-        Obs<F>,
-        Obs<G>,
-        Obs<H>,
+        Signal<A>,
+        Signal<B>,
+        Signal<C>,
+        Signal<D>,
+        Signal<E>,
+        Signal<F>,
+        Signal<G>,
+        Signal<H>,
     )
 {
     type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G, &'a H);
@@ -441,60 +454,60 @@ impl<
     ) -> T {
         let e = entities;
         let entities = [
-            e.0.rctx_entity,
-            e.1.rctx_entity,
-            e.2.rctx_entity,
-            e.3.rctx_entity,
-            e.4.rctx_entity,
-            e.5.rctx_entity,
-            e.6.rctx_entity,
-            e.7.rctx_entity,
+            e.0.reactor_entity,
+            e.1.reactor_entity,
+            e.2.reactor_entity,
+            e.3.reactor_entity,
+            e.4.reactor_entity,
+            e.5.reactor_entity,
+            e.6.reactor_entity,
+            e.7.reactor_entity,
         ];
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] =
             world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<Observable<A>>()
+        a.get_mut::<SignalData<A>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        b.get_mut::<Observable<B>>()
+        b.get_mut::<SignalData<B>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        c.get_mut::<Observable<C>>()
+        c.get_mut::<SignalData<C>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        d.get_mut::<Observable<D>>()
+        d.get_mut::<SignalData<D>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        e.get_mut::<Observable<E>>()
+        e.get_mut::<SignalData<E>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        f.get_mut::<Observable<F>>()
+        f.get_mut::<SignalData<F>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        g.get_mut::<Observable<G>>()
+        g.get_mut::<SignalData<G>>()
             .unwrap()
             .subscribers
             .insert(reader);
-        h.get_mut::<Observable<H>>()
+        h.get_mut::<SignalData<H>>()
             .unwrap()
             .subscribers
             .insert(reader);
 
         derive_fn((
-            &a.get::<Observable<A>>().unwrap().data,
-            &b.get::<Observable<B>>().unwrap().data,
-            &c.get::<Observable<C>>().unwrap().data,
-            &d.get::<Observable<D>>().unwrap().data,
-            &e.get::<Observable<E>>().unwrap().data,
-            &f.get::<Observable<F>>().unwrap().data,
-            &g.get::<Observable<G>>().unwrap().data,
-            &h.get::<Observable<H>>().unwrap().data,
+            &a.get::<SignalData<A>>().unwrap().data,
+            &b.get::<SignalData<B>>().unwrap().data,
+            &c.get::<SignalData<C>>().unwrap().data,
+            &d.get::<SignalData<D>>().unwrap().data,
+            &e.get::<SignalData<E>>().unwrap().data,
+            &f.get::<SignalData<F>>().unwrap().data,
+            &g.get::<SignalData<G>>().unwrap().data,
+            &h.get::<SignalData<H>>().unwrap().data,
         ))
     }
 }
