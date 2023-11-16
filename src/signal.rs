@@ -35,17 +35,15 @@ impl<T: Send + Sync + PartialEq + 'static> Signal<T> {
             .data
     }
 
-    /// Send a signal, and run the reaction graph to completion.
-    ///
-    /// Potentially expensive operation that will write a value to this [`Signal`]`. This will cause
-    /// all reactive subscribers of this observable to recompute their own values, which can cause
-    /// all of its subscribers to recompute, etc.
+    /// See [`ReactiveContext::send_signal`].
     #[inline]
-    pub fn send_signal(&self, rctx: &mut ReactiveContext, value: T) {
+    pub fn send(&self, rctx: &mut ReactiveContext, value: T) {
         SignalData::send_signal(&mut rctx.world, self.reactor_entity, value)
     }
 }
 
+/// The signal component used in the reactive world, which holds the actual data. [`Signal`] is what
+/// users of this plugin use, which is just a lightweight handle to access this mirror component.
 #[derive(Component)]
 pub(crate) struct SignalData<T> {
     data: T,

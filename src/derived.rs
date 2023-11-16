@@ -37,6 +37,9 @@ impl<T: Send + Sync + 'static> Derived<T> {
 
 /// Lives alongside the observable component. This holds a system that can be called without the
 /// caller knowing any type information, and will update the associated observable component.
+///
+/// This component lives in the reactive world and holds the user calculation function. [`Derived`]
+/// is what users of this plugin use, which is a lightweight handle to access this mirror component.
 #[derive(Component)]
 pub(crate) struct DerivedData {
     function: Box<dyn DeriveFn>,

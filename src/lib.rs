@@ -1,10 +1,17 @@
-//! Requirements
-//!
-//! 1. Reactive components must be typed
-//! 2. Reactive update must be synchronous and run to completion
-//!
-//! Can side effects be synchronous if the update is run in an exclusive system?
-
+/// Experimental reactivity extension for bevy.
+///
+/// This plugin holds a reactive graph inside a resource, allowing you to define reactive
+/// relationships, and execute them synchronously. This makes it possible to (effectively) mutate
+/// reactive components in the bevy world, even when you don't have mutable access to them. We
+/// aren't breaking rust's aliasing rules because the components aren't actually being mutated -
+/// [`Signal`], [`Derived`] - are actually lightweight handles to data inside the resource.
+///
+/// The only way to access the data is through the context, or using the slightly less verbose
+/// [`Reactor`] system param.
+///
+/// This makes it possible to define a complex network of signals, derived values, and effects, and
+/// execute them reactively to completion without worrying about frame delays seen with event
+/// propagation or component mutation.
 use std::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -30,10 +37,13 @@ impl bevy_app::Plugin for ReactiveExtensionsPlugin {
     }
 }
 
+/// Generalizes over multiple bevy reactive components the user has access to, that are ultimately
+/// just handles containing the entity in the [`ReactiveContext`].
 pub trait Observable<T> {
     fn reactor_entity(&self) -> Entity;
 }
 
+/// A system param to make accessing the [`ReactiveContext`] less verbose.
 #[derive(SystemParam)]
 pub struct Reactor<'w>(ResMut<'w, ReactiveContext>);
 impl<'w> Deref for Reactor<'w> {
@@ -49,6 +59,8 @@ impl<'w> DerefMut for Reactor<'w> {
     }
 }
 
+/// Contains all reactive state. A bevy world is used because it makes it easy to store statically
+/// typed data in a type erased container.
 #[derive(Default, Resource)]
 pub struct ReactiveContext {
     world: World,
@@ -75,10 +87,10 @@ impl ReactiveContext {
     /// all of its subscribers to recompute, etc.
     pub fn send_signal<T: Send + Sync + PartialEq + 'static>(
         &mut self,
-        observable: Signal<T>,
+        signal: Signal<T>,
         value: T,
     ) {
-        observable.send_signal(self, value);
+        SignalData::send_signal(&mut self.world, signal.reactor_entity, value)
     }
 
     pub fn add_signal<T: Send + Sync + PartialEq + 'static>(
@@ -151,7 +163,7 @@ mod test {
         reactor.send_signal(button1, Button::ON); // Automatically recomputes lock1 & lock2!
         reactor.send_signal(button2, Button::ON);
         for _ in 0..1000 {
-            button1.send_signal(&mut reactor, Button::ON); // diffing prevents triggering a recompute
+            button1.send(&mut reactor, Button::ON); // diffing prevents triggering a recompute
         }
         assert!(lock1.read(&mut reactor).unlocked);
 
