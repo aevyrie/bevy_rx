@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy_ecs::prelude::*;
+use bevy_utils::all_tuples_with_size;
 
 use crate::{Observable, ReactiveContext, Signal, SignalData};
 
@@ -84,331 +85,29 @@ pub trait Derivable<T>: Copy + Send + Sync + 'static {
     ) -> T;
 }
 
-impl<A: ObservableData, T> Derivable<T> for Signal<A> {
-    type Query<'a> = &'a A;
+macro_rules! impl_derivable {
+    ($N: expr, $(($T: ident, $I: ident)),*) => {
+        impl<$($T: ObservableData),*, D> Derivable<D> for ($(Signal<$T>,)*) {
+            type Query<'a> = ($(&'a $T,)*);
 
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [e.reactor_entity];
-        let [mut a] = world.get_many_entities_mut(entities).unwrap();
+            fn read_and_derive(
+                world: &mut World,
+                reader: Entity,
+                derive_fn: fn(Self::Query<'_>) -> D,
+                entities: Self,
+            ) -> D {
+                let ($($I,)*) = entities;
+                let entities = [$($I.reactor_entity,)*];
+                let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
+                $($I.get_mut::<SignalData<$T>>().unwrap().add_subscriber(reader);)*
 
-        derive_fn(a.get::<SignalData<A>>().unwrap().data())
+                derive_fn((
+                    $($I.get::<SignalData<$T>>().unwrap().data(),)*
+                ))
+            }
+        }
     }
 }
 
-impl<A: ObservableData, B: ObservableData, T> Derivable<T> for (Signal<A>, Signal<B>) {
-    type Query<'a> = (&'a A, &'a B);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [e.0.reactor_entity, e.1.reactor_entity];
-        let [mut a, mut b] = world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<A: ObservableData, B: ObservableData, C: ObservableData, T> Derivable<T>
-    for (Signal<A>, Signal<B>, Signal<C>)
-{
-    type Query<'a> = (&'a A, &'a B, &'a C);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [e.0.reactor_entity, e.1.reactor_entity, e.2.reactor_entity];
-        let [mut a, mut b, mut c] = world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<A: ObservableData, B: ObservableData, C: ObservableData, D: ObservableData, T> Derivable<T>
-    for (Signal<A>, Signal<B>, Signal<C>, Signal<D>)
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [
-            e.0.reactor_entity,
-            e.1.reactor_entity,
-            e.2.reactor_entity,
-            e.3.reactor_entity,
-        ];
-        let [mut a, mut b, mut c, mut d] = world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-        d.get_mut::<SignalData<D>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-            d.get::<SignalData<D>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<
-        A: ObservableData,
-        B: ObservableData,
-        C: ObservableData,
-        D: ObservableData,
-        E: ObservableData,
-        T,
-    > Derivable<T> for (Signal<A>, Signal<B>, Signal<C>, Signal<D>, Signal<E>)
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [
-            e.0.reactor_entity,
-            e.1.reactor_entity,
-            e.2.reactor_entity,
-            e.3.reactor_entity,
-            e.4.reactor_entity,
-        ];
-        let [mut a, mut b, mut c, mut d, mut e] = world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-        d.get_mut::<SignalData<D>>().unwrap().add_subscriber(reader);
-        e.get_mut::<SignalData<E>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-            d.get::<SignalData<D>>().unwrap().data(),
-            e.get::<SignalData<E>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<
-        A: ObservableData,
-        B: ObservableData,
-        C: ObservableData,
-        D: ObservableData,
-        E: ObservableData,
-        F: ObservableData,
-        T,
-    > Derivable<T>
-    for (
-        Signal<A>,
-        Signal<B>,
-        Signal<C>,
-        Signal<D>,
-        Signal<E>,
-        Signal<F>,
-    )
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [
-            e.0.reactor_entity,
-            e.1.reactor_entity,
-            e.2.reactor_entity,
-            e.3.reactor_entity,
-            e.4.reactor_entity,
-            e.5.reactor_entity,
-        ];
-        let [mut a, mut b, mut c, mut d, mut e, mut f] =
-            world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-        d.get_mut::<SignalData<D>>().unwrap().add_subscriber(reader);
-        e.get_mut::<SignalData<E>>().unwrap().add_subscriber(reader);
-        f.get_mut::<SignalData<F>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-            d.get::<SignalData<D>>().unwrap().data(),
-            e.get::<SignalData<E>>().unwrap().data(),
-            f.get::<SignalData<F>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<
-        A: ObservableData,
-        B: ObservableData,
-        C: ObservableData,
-        D: ObservableData,
-        E: ObservableData,
-        F: ObservableData,
-        G: ObservableData,
-        T,
-    > Derivable<T>
-    for (
-        Signal<A>,
-        Signal<B>,
-        Signal<C>,
-        Signal<D>,
-        Signal<E>,
-        Signal<F>,
-        Signal<G>,
-    )
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [
-            e.0.reactor_entity,
-            e.1.reactor_entity,
-            e.2.reactor_entity,
-            e.3.reactor_entity,
-            e.4.reactor_entity,
-            e.5.reactor_entity,
-            e.6.reactor_entity,
-        ];
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g] =
-            world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-        d.get_mut::<SignalData<D>>().unwrap().add_subscriber(reader);
-        e.get_mut::<SignalData<E>>().unwrap().add_subscriber(reader);
-        f.get_mut::<SignalData<F>>().unwrap().add_subscriber(reader);
-        g.get_mut::<SignalData<G>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-            d.get::<SignalData<D>>().unwrap().data(),
-            e.get::<SignalData<E>>().unwrap().data(),
-            f.get::<SignalData<F>>().unwrap().data(),
-            g.get::<SignalData<G>>().unwrap().data(),
-        ))
-    }
-}
-
-impl<
-        A: ObservableData,
-        B: ObservableData,
-        C: ObservableData,
-        D: ObservableData,
-        E: ObservableData,
-        F: ObservableData,
-        G: ObservableData,
-        H: ObservableData,
-        T,
-    > Derivable<T>
-    for (
-        Signal<A>,
-        Signal<B>,
-        Signal<C>,
-        Signal<D>,
-        Signal<E>,
-        Signal<F>,
-        Signal<G>,
-        Signal<H>,
-    )
-{
-    type Query<'a> = (&'a A, &'a B, &'a C, &'a D, &'a E, &'a F, &'a G, &'a H);
-
-    fn read_and_derive(
-        world: &mut World,
-        reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
-        entities: Self,
-    ) -> T {
-        let e = entities;
-        let entities = [
-            e.0.reactor_entity,
-            e.1.reactor_entity,
-            e.2.reactor_entity,
-            e.3.reactor_entity,
-            e.4.reactor_entity,
-            e.5.reactor_entity,
-            e.6.reactor_entity,
-            e.7.reactor_entity,
-        ];
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] =
-            world.get_many_entities_mut(entities).unwrap();
-
-        a.get_mut::<SignalData<A>>().unwrap().add_subscriber(reader);
-        b.get_mut::<SignalData<B>>().unwrap().add_subscriber(reader);
-        c.get_mut::<SignalData<C>>().unwrap().add_subscriber(reader);
-        d.get_mut::<SignalData<D>>().unwrap().add_subscriber(reader);
-        e.get_mut::<SignalData<E>>().unwrap().add_subscriber(reader);
-        f.get_mut::<SignalData<F>>().unwrap().add_subscriber(reader);
-        g.get_mut::<SignalData<G>>().unwrap().add_subscriber(reader);
-        h.get_mut::<SignalData<H>>().unwrap().add_subscriber(reader);
-
-        derive_fn((
-            a.get::<SignalData<A>>().unwrap().data(),
-            b.get::<SignalData<B>>().unwrap().data(),
-            c.get::<SignalData<C>>().unwrap().data(),
-            d.get::<SignalData<D>>().unwrap().data(),
-            e.get::<SignalData<E>>().unwrap().data(),
-            f.get::<SignalData<F>>().unwrap().data(),
-            g.get::<SignalData<G>>().unwrap().data(),
-            h.get::<SignalData<H>>().unwrap().data(),
-        ))
-    }
-}
+all_tuples_with_size!(impl_derivable, 1, 32, T, s);
