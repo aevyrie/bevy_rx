@@ -6,15 +6,22 @@
 //! Can side effects be synchronous if the update is run in an exclusive system?
 
 use std::{
-    collections::HashSet,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
 use bevy_ecs::{prelude::*, system::SystemParam};
-use derived::{write_observable, Derivable, DerivedData};
+use derived::{Derivable, Derived, DerivedData};
+use signal::{Signal, SignalData};
 
 pub mod derived;
+pub mod signal;
+
+pub mod prelude {
+    pub use crate::{
+        derived::Derived, signal::Signal, ReactiveContext, ReactiveExtensionsPlugin, Reactor,
+    };
+}
 
 pub struct ReactiveExtensionsPlugin;
 impl bevy_app::Plugin for ReactiveExtensionsPlugin {
@@ -25,79 +32,6 @@ impl bevy_app::Plugin for ReactiveExtensionsPlugin {
 
 pub trait Observable<T> {
     fn reactor_entity(&self) -> Entity;
-}
-
-/// An observable component that can only be accessed through the [`ReactiveContext`].
-#[derive(Debug, Component)]
-pub struct Signal<T: Send + Sync + 'static> {
-    reactor_entity: Entity,
-    p: PhantomData<T>,
-}
-
-impl<T: Send + Sync + PartialEq + 'static> Observable<T> for Signal<T> {
-    fn reactor_entity(&self) -> Entity {
-        self.reactor_entity
-    }
-}
-
-impl<T: Send + Sync + PartialEq + 'static> Clone for Signal<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Send + Sync + PartialEq + 'static> Copy for Signal<T> {}
-
-impl<T: Send + Sync + PartialEq + 'static> Signal<T> {
-    pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
-        &rctx
-            .world
-            .get::<SignalData<T>>(self.reactor_entity)
-            .unwrap()
-            .data
-    }
-
-    /// Send a signal, and run the reaction graph to completion.
-    ///
-    /// Potentially expensive operation that will write a value to this [`Signal`]`. This will cause
-    /// all reactive subscribers of this observable to recompute their own values, which can cause
-    /// all of its subscribers to recompute, etc.
-    #[inline]
-    pub fn send_signal(&self, rctx: &mut ReactiveContext, value: T) {
-        write_observable(&mut rctx.world, self.reactor_entity, value)
-    }
-}
-
-/// A derived component whose value is computed automatically, and can only be read through the
-/// [`ReactiveContext`].
-#[derive(Debug, Component)]
-pub struct Derived<T: Send + Sync + 'static> {
-    reactor_entity: Entity,
-    p: PhantomData<T>,
-}
-
-impl<T: Send + Sync + PartialEq + 'static> Observable<T> for Derived<T> {
-    fn reactor_entity(&self) -> Entity {
-        self.reactor_entity
-    }
-}
-
-impl<T: Send + Sync + 'static> Clone for Derived<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Send + Sync + 'static> Copy for Derived<T> {}
-
-impl<T: Send + Sync + 'static> Derived<T> {
-    pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
-        &rctx
-            .world
-            .get::<SignalData<T>>(self.reactor_entity)
-            .unwrap()
-            .data
-    }
 }
 
 #[derive(SystemParam)]
@@ -128,11 +62,10 @@ impl ReactiveContext {
     ) -> &T {
         // get the obs data from the world
         // add the reader to the obs data's subs
-        &self
-            .world
+        self.world
             .get::<SignalData<T>>(observable.reactor_entity())
             .unwrap()
-            .data
+            .data()
     }
 
     /// Send a signal, and run the reaction graph to completion.
@@ -152,13 +85,7 @@ impl ReactiveContext {
         &mut self,
         initial_value: T,
     ) -> Signal<T> {
-        let rctx_entity = self
-            .world
-            .spawn(SignalData {
-                data: initial_value,
-                subscribers: Default::default(),
-            })
-            .id();
+        let rctx_entity = self.world.spawn(SignalData::new(initial_value)).id();
         Signal {
             reactor_entity: rctx_entity,
             p: PhantomData,
@@ -179,12 +106,6 @@ impl ReactiveContext {
             p: PhantomData,
         }
     }
-}
-
-#[derive(Component)]
-pub(crate) struct SignalData<T> {
-    data: T,
-    subscribers: HashSet<Entity>,
 }
 
 mod test {

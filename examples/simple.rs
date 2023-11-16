@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bevy_app::{prelude::*, ScheduleRunnerPlugin};
 use bevy_ecs::prelude::*;
-use bevy_rx::*;
+use bevy_rx::prelude::*;
 
 fn main() {
     App::new()
@@ -58,6 +58,12 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&De
     let start = Instant::now();
     for _ in 0..1_000_000 {
         reactor.send_signal(button1, Button::ON); // diffing prevents triggering a recompute
+    }
+    dbg!(start.elapsed() / 1_000_000);
+
+    let start = Instant::now();
+    for i in 1..=1_000_000 {
+        reactor.send_signal(button1, Button { active: i % 2 == 0 });
     }
     dbg!(start.elapsed() / 1_000_000);
 
