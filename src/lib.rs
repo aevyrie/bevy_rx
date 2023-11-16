@@ -12,16 +12,15 @@
 /// This makes it possible to define a complex network of signals, derived values, and effects, and
 /// execute them reactively to completion without worrying about frame delays seen with event
 /// propagation or component mutation.
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::{prelude::*, system::SystemParam};
-use derived::{Derivable, Derived, DerivedData};
-use signal::{Signal, SignalData};
+use derived::{Derivable, Derived};
+use reactive::Reactive;
+use signal::Signal;
 
 pub mod derived;
+pub mod reactive;
 pub mod signal;
 
 pub mod prelude {
@@ -39,8 +38,9 @@ impl bevy_app::Plugin for ReactiveExtensionsPlugin {
 
 /// Generalizes over multiple bevy reactive components the user has access to, that are ultimately
 /// just handles containing the entity in the [`ReactiveContext`].
-pub trait Observable<T> {
-    fn reactor_entity(&self) -> Entity;
+pub trait Observable: Copy + Send + Sync + 'static {
+    type Data: PartialEq + Send + Sync + 'static;
+    fn reactive_entity(&self) -> Entity;
 }
 
 /// A system param to make accessing the [`ReactiveContext`] less verbose.
@@ -67,15 +67,16 @@ pub struct ReactiveContext {
 }
 
 impl ReactiveContext {
-    /// Returns a reference to the current value of the provided observable.
-    pub fn read<T: Send + Sync + PartialEq + 'static>(
+    /// Returns a reference to the current value of the provided observable. The observable is any
+    /// reactive handle that has a value, like a [`Signal`] or a [`Derived`].
+    pub fn read<T: Send + Sync + PartialEq + 'static, O: Observable<Data = T>>(
         &mut self,
-        observable: impl Observable<T>,
+        observable: O,
     ) -> &T {
         // get the obs data from the world
         // add the reader to the obs data's subs
         self.world
-            .get::<SignalData<T>>(observable.reactor_entity())
+            .get::<Reactive<T>>(observable.reactive_entity())
             .unwrap()
             .data()
     }
@@ -90,49 +91,35 @@ impl ReactiveContext {
         signal: Signal<T>,
         value: T,
     ) {
-        SignalData::send_signal(&mut self.world, signal.reactor_entity, value)
+        Reactive::send_signal(&mut self.world, signal.reactive_entity(), value)
     }
 
     pub fn add_signal<T: Send + Sync + PartialEq + 'static>(
         &mut self,
         initial_value: T,
     ) -> Signal<T> {
-        let rctx_entity = self.world.spawn(SignalData::new(initial_value)).id();
-        Signal {
-            reactor_entity: rctx_entity,
-            p: PhantomData,
-        }
+        Signal::new(self, initial_value)
     }
 
     pub fn add_derived<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         &mut self,
         input_deps: D,
-        derive_fn: fn(D::Query<'_>) -> C,
+        derive_fn: (impl Fn(D::Query<'_>) -> C + Send + Sync + Clone + 'static),
     ) -> Derived<C> {
-        let entity = self.world.spawn_empty().id();
-        let mut derived = DerivedData::new(entity, input_deps, derive_fn);
-        derived.execute(&mut self.world);
-        self.world.entity_mut(entity).insert(derived);
-        Derived {
-            reactor_entity: entity,
-            p: PhantomData,
-        }
+        Derived::new(self, input_deps, derive_fn)
     }
 }
 
 mod test {
-
     #[test]
     fn basic() {
-        use crate::ReactiveContext;
-
         #[derive(Debug, PartialEq)]
         struct Button {
             active: bool,
         }
         impl Button {
-            const OFF: Self = Button { active: false };
-            const ON: Self = Button { active: true };
+            pub const OFF: Self = Button { active: false };
+            pub const ON: Self = Button { active: true };
         }
 
         #[derive(Debug, PartialEq)]
@@ -149,15 +136,15 @@ mod test {
             }
         }
 
-        let mut reactor = ReactiveContext::default();
+        let mut reactor = crate::ReactiveContext::default();
 
         let button1 = reactor.add_signal(Button::OFF);
         let button2 = reactor.add_signal(Button::OFF);
-        let lock1 = reactor.add_derived((button1, button2), Lock::two_buttons);
+        let lock1 = reactor.add_derived((button1, button2), &Lock::two_buttons);
         assert!(!reactor.read(lock1).unlocked);
 
         let button3 = reactor.add_signal(Button::OFF);
-        let lock2 = reactor.add_derived((button1, button3), Lock::two_buttons);
+        let lock2 = reactor.add_derived((button1, button3), &Lock::two_buttons);
         assert!(!reactor.read(lock2).unlocked);
 
         reactor.send_signal(button1, Button::ON); // Automatically recomputes lock1 & lock2!
@@ -169,5 +156,43 @@ mod test {
 
         reactor.send_signal(button3, Button::ON);
         assert!(reactor.read(lock2).unlocked);
+    }
+
+    #[test]
+    fn nested_derive() {
+        let mut reactor = crate::ReactiveContext::default();
+
+        let add = |n: (&f32, &f32)| n.0 + n.1;
+
+        let n1 = reactor.add_signal(1.0);
+        let n2 = reactor.add_signal(10.0);
+        let n3 = reactor.add_signal(100.0);
+
+        // The following derives use signals as inputs
+        let d1 = reactor.add_derived((n1, n2), add); // 1 + 10
+        let d2 = reactor.add_derived((n3, n2), add); // 100 + 10
+
+        // This derive uses other derives as inputs
+        let d3 = reactor.add_derived((d1, d2), add); // 11 + 110
+        assert_eq!(*reactor.read(d3), 121.0);
+    }
+
+    #[test]
+    fn many_types() {
+        #[derive(Debug, PartialEq)]
+        struct Foo(f32);
+        #[derive(Debug, PartialEq)]
+        struct Bar(f32);
+        #[derive(Debug, PartialEq)]
+        struct Baz(f32);
+
+        let mut reactor = crate::ReactiveContext::default();
+
+        let foo = reactor.add_signal(Foo(1.0));
+        let bar = reactor.add_signal(Bar(1.0));
+
+        let baz = reactor.add_derived((foo, bar), |(foo, bar)| Baz(foo.0 + bar.0));
+
+        assert_eq!(reactor.read(baz), &Baz(2.0));
     }
 }

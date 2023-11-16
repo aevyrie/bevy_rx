@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy_ecs::prelude::*;
 use bevy_utils::all_tuples_with_size;
 
-use crate::{Observable, ReactiveContext, Signal, SignalData};
+use crate::{Observable, Reactive, ReactiveContext};
 
 /// A derived component whose value is computed automatically, and can only be read through the
 /// [`ReactiveContext`].
@@ -13,24 +13,40 @@ pub struct Derived<T: Send + Sync + 'static> {
     pub(crate) p: PhantomData<T>,
 }
 
-impl<T: Send + Sync + PartialEq + 'static> Observable<T> for Derived<T> {
-    fn reactor_entity(&self) -> Entity {
+impl<T: Send + Sync + PartialEq> Observable for Derived<T> {
+    type Data = T;
+    fn reactive_entity(&self) -> Entity {
         self.reactor_entity
     }
 }
 
-impl<T: Send + Sync + 'static> Clone for Derived<T> {
+impl<T: Send + Sync> Clone for Derived<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Send + Sync + 'static> Copy for Derived<T> {}
+impl<T: Send + Sync> Copy for Derived<T> {}
 
-impl<T: Send + Sync + 'static> Derived<T> {
+impl<T: PartialEq + Send + Sync> Derived<T> {
+    pub fn new<D: Derivable<T>>(
+        rctx: &mut ReactiveContext,
+        input_deps: D,
+        derive_fn: (impl Fn(D::Query<'_>) -> T + Send + Sync + Clone + 'static),
+    ) -> Self {
+        let entity = rctx.world.spawn_empty().id();
+        let mut derived = DerivedData::new(entity, input_deps, derive_fn);
+        derived.execute(&mut rctx.world);
+        rctx.world.entity_mut(entity).insert(derived);
+        Self {
+            reactor_entity: entity,
+            p: PhantomData,
+        }
+    }
+
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         rctx.world
-            .get::<SignalData<T>>(self.reactor_entity)
+            .get::<Reactive<T>>(self.reactor_entity)
             .unwrap()
             .data()
     }
@@ -46,23 +62,23 @@ pub(crate) struct DerivedData {
     function: Box<dyn DeriveFn>,
 }
 
-pub(crate) trait ObservableData: Send + Sync + PartialEq + 'static {}
-impl<T: Send + Sync + PartialEq + 'static> ObservableData for T {}
-
-trait DeriveFn: Send + Sync + 'static + FnMut(&mut World) {}
-impl<T: Send + Sync + 'static + FnMut(&mut World)> DeriveFn for T {}
+trait DeriveFn: Send + Sync + FnMut(&mut World) {}
+impl<T: Send + Sync + FnMut(&mut World)> DeriveFn for T {}
 
 impl DerivedData {
     pub(crate) fn new<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         derived: Entity,
         input_deps: D,
-        derive_fn: fn(D::Query<'_>) -> C,
+        derive_fn: (impl Fn(D::Query<'_>) -> C + Send + Sync + Clone + 'static),
     ) -> Self {
         let function = move |world: &mut World| {
-            let derived_result = D::read_and_derive(world, derived, derive_fn, input_deps);
-            // using write here will trigger all subscribers, which in turn can trigger this
-            // function through derived functions, traversing the entire graph.
-            SignalData::send_signal(world, derived, derived_result);
+            if let Some(derived_result) =
+                D::read_and_derive(world, derived, derive_fn.clone(), input_deps)
+            {
+                // calling this will trigger all subscribers, which in turn can trigger this
+                // function through derived functions, traversing the entire graph.
+                Reactive::send_signal(world, derived, derived_result);
+            }
         };
         let function = Box::new(function);
         Self { function }
@@ -80,31 +96,31 @@ pub trait Derivable<T>: Copy + Send + Sync + 'static {
     fn read_and_derive(
         world: &mut World,
         reader: Entity,
-        derive_fn: fn(Self::Query<'_>) -> T,
+        derive_fn: impl Fn(Self::Query<'_>) -> T,
         input_deps: Self,
-    ) -> T;
+    ) -> Option<T>;
 }
 
 macro_rules! impl_derivable {
     ($N: expr, $(($T: ident, $I: ident)),*) => {
-        impl<$($T: ObservableData),*, D> Derivable<D> for ($(Signal<$T>,)*) {
-            type Query<'a> = ($(&'a $T,)*);
+        impl<$($T: Observable), *, D> Derivable<D> for ($($T,)*) {
+            type Query<'a> = ($(&'a $T::Data,)*);
 
             fn read_and_derive(
                 world: &mut World,
                 reader: Entity,
-                derive_fn: fn(Self::Query<'_>) -> D,
+                derive_fn: impl Fn(Self::Query<'_>) -> D,
                 entities: Self,
-            ) -> D {
+            ) -> Option<D> {
                 let ($($I,)*) = entities;
-                let entities = [$($I.reactor_entity,)*];
+                let entities = [$($I.reactive_entity(),)*];
                 let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
-                $($I.get_mut::<SignalData<$T>>().unwrap().add_subscriber(reader);)*
+                $($I.get_mut::<Reactive<$T::Data>>()?.subscribe(reader);)*
 
-                derive_fn((
-                    $($I.get::<SignalData<$T>>().unwrap().data(),)*
-                ))
+                Some(derive_fn((
+                    $($I.get::<Reactive<$T::Data>>()?.data(),)*
+                )))
             }
         }
     }
