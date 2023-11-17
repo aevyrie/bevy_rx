@@ -114,6 +114,10 @@ macro_rules! impl_derivable {
             ) -> Option<D> {
                 let ($($I,)*) = entities;
                 let entities = [$($I.reactive_entity(),)*];
+
+                // Note this is left to unwrap intentionally. If aliased mutability happens, this is
+                // an error and should panic. If we were to early exit here, it would lead to
+                // harder-to-debug errors down the line.
                 let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
                 $($I.get_mut::<Reactive<$T::Data>>()?.subscribe(reader);)*

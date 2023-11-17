@@ -51,7 +51,7 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&De
 
     let start = Instant::now();
     reactor.send_signal(button2, Button::ON);
-    dbg!(start.elapsed());
+    println!("Sending 1 signal = {:#?}", start.elapsed());
 
     assert!(reactor.read(lock1).unlocked);
 
@@ -59,13 +59,19 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&De
     for _ in 0..1_000_000 {
         reactor.send_signal(button1, Button::ON); // diffing prevents triggering a recompute
     }
-    dbg!(start.elapsed() / 1_000_000);
+    println!(
+        "Sending 1,000,000 signals with same value = {:#?}/iter",
+        start.elapsed() / 1_000_000
+    );
 
     let start = Instant::now();
     for i in 1..=1_000_000 {
         reactor.send_signal(button1, Button { active: i % 2 == 0 });
     }
-    dbg!(start.elapsed() / 1_000_000);
+    println!(
+        "Sending 1,000,000 signals with alternating value = {:#?}/iter",
+        start.elapsed() / 1_000_000
+    );
 
     let button3 = reactor.new_signal(Button::OFF); // We can add a new signal locally
     let lock2 = reactor.new_derived((button1, button3), Lock::two_buttons); // Local and ECS signals
@@ -76,7 +82,10 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&De
             dbg!("nope");
         }
     }
-    dbg!(start.elapsed() / 1);
+    println!(
+        "Reading a derivation 1,000,000 times = {:#?}/iter",
+        start.elapsed() / 1_000_000
+    );
 
     assert!(reactor.read(lock2).unlocked);
 }

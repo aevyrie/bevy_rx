@@ -195,4 +195,33 @@ mod test {
 
         assert_eq!(reactor.read(baz), &Baz(2.0));
     }
+
+    #[test]
+    fn calculate_pi() {
+        let mut reactor = crate::ReactiveContext::default();
+
+        let increment = |(n,): (&f64,)| n + 1.0;
+        let bailey_borwein_plouffe = |(k, last_value): (&f64, &f64)| {
+            last_value
+                + 1.0 / (16f64.powf(*k))
+                    * (4.0 / (8.0 * k + 1.0)
+                        - 2.0 / (8.0 * k + 4.0)
+                        - 1.0 / (8.0 * k + 5.0)
+                        - 1.0 / (8.0 * k + 6.0))
+        };
+
+        let k_0 = reactor.new_signal(0.0);
+        let iter_0 = reactor.new_signal(0.0);
+        let mut iteration = reactor.new_derived((k_0, iter_0), bailey_borwein_plouffe);
+        let mut k = reactor.new_derived((k_0,), increment);
+        for _ in 0..1000 {
+            iteration = reactor.new_derived((k, iteration), bailey_borwein_plouffe);
+            k = reactor.new_derived((k,), increment);
+        }
+        println!("PI: {:.32}", reactor.read(iteration));
+
+        let start = bevy_utils::Instant::now();
+        reactor.send_signal(k_0, f64::EPSILON);
+        println!("Recomputing PI took = {:#?}", start.elapsed());
+    }
 }
