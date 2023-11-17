@@ -94,14 +94,14 @@ impl ReactiveContext {
         Reactive::send_signal(&mut self.world, signal.reactive_entity(), value)
     }
 
-    pub fn add_signal<T: Send + Sync + PartialEq + 'static>(
+    pub fn new_signal<T: Send + Sync + PartialEq + 'static>(
         &mut self,
         initial_value: T,
     ) -> Signal<T> {
         Signal::new(self, initial_value)
     }
 
-    pub fn add_derived<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
+    pub fn new_derived<C: Send + Sync + PartialEq + 'static, D: Derivable<C> + 'static>(
         &mut self,
         input_deps: D,
         derive_fn: (impl Fn(D::Query<'_>) -> C + Send + Sync + Clone + 'static),
@@ -138,13 +138,13 @@ mod test {
 
         let mut reactor = crate::ReactiveContext::default();
 
-        let button1 = reactor.add_signal(Button::OFF);
-        let button2 = reactor.add_signal(Button::OFF);
-        let lock1 = reactor.add_derived((button1, button2), &Lock::two_buttons);
+        let button1 = reactor.new_signal(Button::OFF);
+        let button2 = reactor.new_signal(Button::OFF);
+        let lock1 = reactor.new_derived((button1, button2), &Lock::two_buttons);
         assert!(!reactor.read(lock1).unlocked);
 
-        let button3 = reactor.add_signal(Button::OFF);
-        let lock2 = reactor.add_derived((button1, button3), &Lock::two_buttons);
+        let button3 = reactor.new_signal(Button::OFF);
+        let lock2 = reactor.new_derived((button1, button3), &Lock::two_buttons);
         assert!(!reactor.read(lock2).unlocked);
 
         reactor.send_signal(button1, Button::ON); // Automatically recomputes lock1 & lock2!
@@ -164,16 +164,16 @@ mod test {
 
         let add = |n: (&f32, &f32)| n.0 + n.1;
 
-        let n1 = reactor.add_signal(1.0);
-        let n2 = reactor.add_signal(10.0);
-        let n3 = reactor.add_signal(100.0);
+        let n1 = reactor.new_signal(1.0);
+        let n2 = reactor.new_signal(10.0);
+        let n3 = reactor.new_signal(100.0);
 
         // The following derives use signals as inputs
-        let d1 = reactor.add_derived((n1, n2), add); // 1 + 10
-        let d2 = reactor.add_derived((n3, n2), add); // 100 + 10
+        let d1 = reactor.new_derived((n1, n2), add); // 1 + 10
+        let d2 = reactor.new_derived((n3, n2), add); // 100 + 10
 
         // This derive uses other derives as inputs
-        let d3 = reactor.add_derived((d1, d2), add); // 11 + 110
+        let d3 = reactor.new_derived((d1, d2), add); // 11 + 110
         assert_eq!(*reactor.read(d3), 121.0);
     }
 
@@ -188,10 +188,10 @@ mod test {
 
         let mut reactor = crate::ReactiveContext::default();
 
-        let foo = reactor.add_signal(Foo(1.0));
-        let bar = reactor.add_signal(Bar(1.0));
+        let foo = reactor.new_signal(Foo(1.0));
+        let bar = reactor.new_signal(Bar(1.0));
 
-        let baz = reactor.add_derived((foo, bar), |(foo, bar)| Baz(foo.0 + bar.0));
+        let baz = reactor.new_derived((foo, bar), |(foo, bar)| Baz(foo.0 + bar.0));
 
         assert_eq!(reactor.read(baz), &Baz(2.0));
     }
