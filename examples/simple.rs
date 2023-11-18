@@ -37,12 +37,12 @@ impl Lock {
 fn setup(mut commands: Commands, mut reactor: Reactor) {
     let button1 = reactor.new_signal(Button::OFF);
     let button2 = reactor.new_signal(Button::OFF);
-    commands.spawn(reactor.new_derived((button1, button2), Lock::two_buttons));
+    commands.spawn(reactor.new_calc((button1, button2), Lock::two_buttons));
     commands.spawn(button1);
     commands.spawn(button2);
 }
 
-fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&Derived<Lock>>) {
+fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&Calc<Lock>>) {
     // Signals and derivations from the ECS
     let mut buttons = buttons.iter().copied();
     let [button1, button2] = [buttons.next().unwrap(), buttons.next().unwrap()];
@@ -74,7 +74,7 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&De
     );
 
     let button3 = reactor.new_signal(Button::OFF); // We can add a new signal locally
-    let lock2 = reactor.new_derived((button1, button3), Lock::two_buttons); // Local and ECS signals
+    let lock2 = reactor.new_calc((button1, button3), Lock::two_buttons); // Local and ECS signals
     reactor.send_signal(button3, Button::ON);
     let start = Instant::now();
     for _ in 0..1_000_000 {

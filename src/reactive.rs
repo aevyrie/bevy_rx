@@ -1,5 +1,4 @@
 use bevy_ecs::prelude::*;
-use bevy_utils::HashSet;
 
 use crate::ReactiveContext;
 
@@ -7,8 +6,8 @@ use crate::ReactiveContext;
 /// data changes.
 #[derive(Component)]
 pub(crate) struct Reactive<T> {
-    data: T,
-    subscribers: HashSet<Entity>,
+    pub data: T,
+    pub subscribers: Vec<Entity>,
 }
 
 impl<T: Send + Sync + 'static> Reactive<T> {
@@ -17,13 +16,13 @@ impl<T: Send + Sync + 'static> Reactive<T> {
         rctx.world
             .spawn(Self {
                 data,
-                subscribers: Default::default(),
+                subscribers: Vec::with_capacity(0),
             })
             .id()
     }
 
     pub(crate) fn subscribe(&mut self, entity: Entity) {
-        self.subscribers.insert(entity);
+        self.subscribers.push(entity);
     }
 
     pub(crate) fn data(&self) -> &T {
@@ -40,13 +39,15 @@ impl<T: PartialEq + Send + Sync + 'static> Reactive<T> {
                 return; // Diff the value and early exit if no change.
             }
             reactive.data = value;
-            let mut subscribers = std::mem::take(&mut reactive.subscribers);
-            for sub in subscribers.drain() {
-                if let Some(mut derived) =
-                    world.entity_mut(sub).take::<crate::derived::DerivedData>()
+
+            let mut stack = std::mem::take(&mut reactive.subscribers);
+            while let Some(sub) = stack.pop() {
+                if let Some(mut calculation) = world
+                    .entity_mut(sub)
+                    .take::<crate::calculated::CalcFunction>()
                 {
-                    derived.execute(world);
-                    world.entity_mut(sub).insert(derived);
+                    calculation.execute(world, &mut stack);
+                    world.entity_mut(sub).insert(calculation);
                 }
             }
         } else {
