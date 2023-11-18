@@ -16,7 +16,7 @@ impl<T: Send + Sync + 'static> Reactive<T> {
         rctx.world
             .spawn(Self {
                 data,
-                subscribers: Vec::with_capacity(0),
+                subscribers: Vec::new(),
             })
             .id()
     }

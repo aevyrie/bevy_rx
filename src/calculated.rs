@@ -90,7 +90,7 @@ impl CalcFunction {
                 } else {
                     world.entity_mut(derived).insert(Reactive {
                         data: computed_value,
-                        subscribers: Vec::with_capacity(0),
+                        subscribers: Vec::new(),
                     });
                 }
             }
