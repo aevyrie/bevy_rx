@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy_ecs::prelude::*;
 use bevy_utils::all_tuples_with_size;
 
-use crate::{Observable, Reactive, ReactiveContext};
+use crate::{Observable, ObservableData, ReactiveContext};
 
 /// A reactive component whose value is recalculated automatically, and can only be read through the
 /// [`ReactiveContext`].
@@ -46,7 +46,7 @@ impl<T: PartialEq + Send + Sync> Calc<T> {
 
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         rctx.world
-            .get::<Reactive<T>>(self.reactor_entity)
+            .get::<ObservableData<T>>(self.reactor_entity)
             .unwrap()
             .data()
     }
@@ -67,32 +67,14 @@ impl<T: Send + Sync + FnMut(&mut World, &mut Vec<Entity>)> DeriveFn for T {}
 
 impl CalcFunction {
     pub(crate) fn new<C: Send + Sync + PartialEq + 'static, D: CalcQuery<C> + 'static>(
-        derived: Entity,
+        entity: Entity,
         input_deps: D,
         derive_fn: (impl Fn(D::Query<'_>) -> C + Send + Sync + Clone + 'static),
     ) -> Self {
         let function = move |world: &mut World, stack: &mut Vec<Entity>| {
-            let computed_value = D::read_and_derive(world, derived, derive_fn.clone(), input_deps);
+            let computed_value = D::read_and_derive(world, entity, derive_fn.clone(), input_deps);
             if let Some(computed_value) = computed_value {
-                if let Some(mut reactive) = world.get_mut::<Reactive<C>>(derived) {
-                    if reactive.data == computed_value {
-                        return; // Diff the value and early exit if no change.
-                    }
-                    reactive.data = computed_value;
-                    // Remove all subscribers from this entity. If any of these subscribers end up
-                    // using this data, they will resubscribe themselves. This is the
-                    // auto-unsubscribe part of the reactive implementation.
-                    //
-                    // We push these subscribers on the stack, so that they can be executed, just
-                    // like this one was. We use a stack instead of recursion to avoid stack
-                    // overflow.
-                    stack.append(&mut reactive.subscribers);
-                } else {
-                    world.entity_mut(derived).insert(Reactive {
-                        data: computed_value,
-                        subscribers: Vec::new(),
-                    });
-                }
+                ObservableData::update_value(world, stack, entity, computed_value);
             }
         };
         let function = Box::new(function);
@@ -103,25 +85,6 @@ impl CalcFunction {
         (self.function)(world, stack);
     }
 }
-
-/// send signal
-///     for sub in subs
-///         execute
-///             read and derive
-///                 send signal
-///
-/// execute ( &mut World, &mut stack )
-///     compute calculated val ( &mut World )
-///     for sub in subs
-///         push sub.entity to stack
-///
-/// send signal
-///     get self, check if value changed
-///     update self to new
-///     mut stack = self.subs
-///     loop
-///         let callback = stack.take(1))
-///         callback(world, &mut stack) // push multiple fns on stack?
 
 /// Implemented on tuples to be used for querying
 pub trait CalcQuery<T>: Copy + Send + Sync + 'static {
@@ -153,10 +116,10 @@ macro_rules! impl_CalcQuery {
                 // harder-to-debug errors down the line.
                 let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
-                $($I.get_mut::<Reactive<$T::Data>>()?.subscribe(reader);)*
+                $($I.get_mut::<ObservableData<$T::Data>>()?.subscribe(reader);)*
 
                 Some(derive_fn((
-                    $($I.get::<Reactive<$T::Data>>()?.data(),)*
+                    $($I.get::<ObservableData<$T::Data>>()?.data(),)*
                 )))
             }
         }

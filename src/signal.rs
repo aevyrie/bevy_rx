@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use bevy_ecs::prelude::*;
 
-use crate::{reactive::Reactive, Observable, ReactiveContext};
+use crate::{observable::ObservableData, Observable, ReactiveContext};
 
 /// An reactive component that can be subscribed to, and whose value can only be accessed through
 /// the [`ReactiveContext`].
@@ -30,14 +30,14 @@ impl<T: Send + Sync + PartialEq> Copy for Signal<T> {}
 impl<T: Send + Sync + PartialEq> Signal<T> {
     pub(crate) fn new(rctx: &mut ReactiveContext, initial_value: T) -> Self {
         Self {
-            reactor_entity: Reactive::new(rctx, initial_value),
+            reactor_entity: ObservableData::new(rctx, initial_value),
             p: PhantomData,
         }
     }
 
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         rctx.world
-            .get::<Reactive<T>>(self.reactor_entity)
+            .get::<ObservableData<T>>(self.reactor_entity)
             .unwrap()
             .data()
     }
@@ -45,6 +45,6 @@ impl<T: Send + Sync + PartialEq> Signal<T> {
     /// See [`ReactiveContext::send_signal`].
     #[inline]
     pub fn send(&self, rctx: &mut ReactiveContext, value: T) {
-        Reactive::send_signal(&mut rctx.world, self.reactor_entity, value)
+        ObservableData::send_signal(&mut rctx.world, self.reactor_entity, value)
     }
 }

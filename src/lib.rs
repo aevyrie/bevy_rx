@@ -15,18 +15,19 @@
 use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::{prelude::*, system::SystemParam};
-use calculated::CalcQuery;
+use calculation::CalcQuery;
+use observable::{Observable, ObservableData};
 use prelude::Calc;
-use reactive::Reactive;
 use signal::Signal;
 
-pub mod calculated;
-pub mod reactive;
+pub mod calculation;
+pub mod callback;
+pub mod observable;
 pub mod signal;
 
 pub mod prelude {
     pub use crate::{
-        calculated::Calc, signal::Signal, ReactiveContext, ReactiveExtensionsPlugin, Reactor,
+        calculation::Calc, signal::Signal, ReactiveContext, ReactiveExtensionsPlugin, Reactor,
     };
 }
 
@@ -35,13 +36,6 @@ impl bevy_app::Plugin for ReactiveExtensionsPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_resource::<ReactiveContext>();
     }
-}
-
-/// Generalizes over multiple bevy reactive components the user has access to, that are ultimately
-/// just handles containing the entity in the [`ReactiveContext`].
-pub trait Observable: Copy + Send + Sync + 'static {
-    type Data: PartialEq + Send + Sync + 'static;
-    fn reactive_entity(&self) -> Entity;
 }
 
 /// A system param to make accessing the [`ReactiveContext`] less verbose.
@@ -77,7 +71,7 @@ impl ReactiveContext {
         // get the obs data from the world
         // add the reader to the obs data's subs
         self.world
-            .get::<Reactive<T>>(observable.reactive_entity())
+            .get::<ObservableData<T>>(observable.reactive_entity())
             .unwrap()
             .data()
     }
@@ -92,7 +86,7 @@ impl ReactiveContext {
         signal: Signal<T>,
         value: T,
     ) {
-        Reactive::send_signal(&mut self.world, signal.reactive_entity(), value)
+        ObservableData::send_signal(&mut self.world, signal.reactive_entity(), value)
     }
 
     pub fn new_signal<T: Send + Sync + PartialEq + 'static>(
