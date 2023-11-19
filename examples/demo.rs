@@ -12,52 +12,54 @@ fn main() {
         .run()
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Component, Clone, Copy)]
 struct Button {
-    active: bool,
-}
-impl Button {
-    const OFF: Self = Button { active: false };
-    const ON: Self = Button { active: true };
+    active: Signal<bool>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Component, Clone, Copy)]
 struct Lock {
-    unlocked: bool,
+    unlocked: Calc<bool>,
 }
 
 impl Lock {
     /// A lock will only unlock if both of its buttons are active
-    fn two_buttons(buttons: (&Button, &Button)) -> Self {
-        let unlocked = buttons.0.active && buttons.1.active;
-        Self { unlocked }
+    fn two_buttons(buttons: (&bool, &bool)) -> bool {
+        *buttons.0 && *buttons.1
     }
 }
 
 fn setup(mut commands: Commands, mut reactor: Reactor) {
-    let button1 = reactor.new_signal(Button::OFF);
-    let button2 = reactor.new_signal(Button::OFF);
-    commands.spawn(reactor.new_calc((button1, button2), Lock::two_buttons));
+    let button1 = Button {
+        active: reactor.signal(false),
+    };
+    let button2 = Button {
+        active: reactor.signal(false),
+    };
+    let lock = Lock {
+        unlocked: reactor.calc((button1.active, button2.active), Lock::two_buttons),
+    };
+    commands.spawn(lock);
     commands.spawn(button1);
     commands.spawn(button2);
 }
 
-fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&Calc<Lock>>) {
+fn update(mut reactor: Reactor, buttons: Query<&Button>, lock: Query<&Lock>) {
     // Signals and derivations from the ECS
     let mut buttons = buttons.iter().copied();
     let [button1, button2] = [buttons.next().unwrap(), buttons.next().unwrap()];
     let lock1 = *lock.single();
-    reactor.send_signal(button1, Button::ON);
+    reactor.send_signal(button1.active, true);
 
     let start = Instant::now();
-    reactor.send_signal(button2, Button::ON);
+    reactor.send_signal(button2.active, true);
     println!("Sending 1 signal = {:#?}", start.elapsed());
 
-    assert!(reactor.read(lock1).unlocked);
+    assert!(reactor.read(lock1.unlocked));
 
     let start = Instant::now();
     for _ in 0..1_000_000 {
-        reactor.send_signal(button1, Button::ON); // diffing prevents triggering a recompute
+        reactor.send_signal(button1.active, true); // diffing prevents triggering a recompute
     }
     println!(
         "Sending 1,000,000 signals with same value = {:#?}/iter",
@@ -66,19 +68,20 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&Ca
 
     let start = Instant::now();
     for i in 1..=1_000_000 {
-        reactor.send_signal(button1, Button { active: i % 2 == 0 });
+        reactor.send_signal(button1.active, i % 2 == 0);
     }
     println!(
         "Sending 1,000,000 signals with alternating value = {:#?}/iter",
         start.elapsed() / 1_000_000
     );
 
-    let button3 = reactor.new_signal(Button::OFF); // We can add a new signal locally
-    let lock2 = reactor.new_calc((button1, button3), Lock::two_buttons); // Local and ECS signals
-    reactor.send_signal(button3, Button::ON);
+    let local_signal = reactor.signal(false); // We can add a new signal locally
+
+    let lock2 = reactor.calc((button1.active, local_signal), Lock::two_buttons); // Local and ECS
+    reactor.send_signal(local_signal, true);
     let start = Instant::now();
     for _ in 0..1_000_000 {
-        if !reactor.read(lock2).unlocked {
+        if !reactor.read(lock2) {
             dbg!("nope");
         }
     }
@@ -87,5 +90,5 @@ fn update(mut reactor: Reactor, buttons: Query<&Signal<Button>>, lock: Query<&Ca
         start.elapsed() / 1_000_000
     );
 
-    assert!(reactor.read(lock2).unlocked);
+    assert!(reactor.read(lock2));
 }

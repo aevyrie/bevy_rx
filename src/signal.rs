@@ -13,7 +13,7 @@ pub struct Signal<T: Send + Sync + 'static> {
 }
 
 impl<T: Send + Sync + PartialEq> Observable for Signal<T> {
-    type Data = T;
+    type DataType = T;
     fn reactive_entity(&self) -> Entity {
         self.reactor_entity
     }

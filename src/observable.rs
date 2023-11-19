@@ -5,7 +5,7 @@ use crate::ReactiveContext;
 /// Generalizes over multiple bevy reactive components the user has access to, that are ultimately
 /// just handles containing the entity in the [`ReactiveContext`].
 pub trait Observable: Copy + Send + Sync + 'static {
-    type Data: PartialEq + Send + Sync + 'static;
+    type DataType: PartialEq + Send + Sync + 'static;
     fn reactive_entity(&self) -> Entity;
 }
 

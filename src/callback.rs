@@ -1,6 +1,6 @@
 use bevy_ecs::{prelude::*, system::BoxedSystem};
 
-/// A reactive component that makes changes to the bevy [`World`] by applying a command that runs
+/// A reactive component that makes changes to the bevy [`World`] by running a system that runs
 /// only when the values it queries change.
 #[derive(Debug, Component)]
 pub struct ReactiveCallback {

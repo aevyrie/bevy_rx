@@ -14,7 +14,7 @@ pub struct Calc<T: Send + Sync + 'static> {
 }
 
 impl<T: Send + Sync + PartialEq> Observable for Calc<T> {
-    type Data = T;
+    type DataType = T;
     fn reactive_entity(&self) -> Entity {
         self.reactor_entity
     }
@@ -100,7 +100,7 @@ pub trait CalcQuery<T>: Copy + Send + Sync + 'static {
 macro_rules! impl_CalcQuery {
     ($N: expr, $(($T: ident, $I: ident)),*) => {
         impl<$($T: Observable), *, D> CalcQuery<D> for ($($T,)*) {
-            type Query<'a> = ($(&'a $T::Data,)*);
+            type Query<'a> = ($(&'a $T::DataType,)*);
 
             fn read_and_derive(
                 world: &mut World,
@@ -116,10 +116,10 @@ macro_rules! impl_CalcQuery {
                 // harder-to-debug errors down the line.
                 let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
-                $($I.get_mut::<ObservableData<$T::Data>>()?.subscribe(reader);)*
+                $($I.get_mut::<ObservableData<$T::DataType>>()?.subscribe(reader);)*
 
                 Some(derive_fn((
-                    $($I.get::<ObservableData<$T::Data>>()?.data(),)*
+                    $($I.get::<ObservableData<$T::DataType>>()?.data(),)*
                 )))
             }
         }
