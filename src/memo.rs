@@ -5,39 +5,40 @@ use bevy_utils::all_tuples_with_size;
 
 use crate::{Observable, ObservableData, ReactiveContext};
 
-/// A reactive component whose value is recalculated automatically, and can only be read through the
-/// [`ReactiveContext`].
+/// A reactive value that is automatically recalculated and memoized (cached).
+///
+/// The value can only be read through the [`ReactiveContext`].
 #[derive(Debug, Component)]
-pub struct Calc<T: Send + Sync + 'static> {
+pub struct Memo<T: Send + Sync + 'static> {
     pub(crate) reactor_entity: Entity,
     pub(crate) p: PhantomData<T>,
 }
 
-impl<T: Send + Sync + PartialEq> Observable for Calc<T> {
+impl<T: Send + Sync + PartialEq> Observable for Memo<T> {
     type DataType = T;
     fn reactive_entity(&self) -> Entity {
         self.reactor_entity
     }
 }
 
-impl<T: Send + Sync> Clone for Calc<T> {
+impl<T: Send + Sync> Clone for Memo<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Send + Sync> Copy for Calc<T> {}
+impl<T: Send + Sync> Copy for Memo<T> {}
 
-impl<T: PartialEq + Send + Sync> Calc<T> {
-    pub fn new<D: CalcQuery<T>>(
+impl<T: Clone + PartialEq + Send + Sync> Memo<T> {
+    pub fn new<D: MemoQuery<T>>(
         rctx: &mut ReactiveContext,
         input_deps: D,
         derive_fn: (impl Fn(D::Query<'_>) -> T + Send + Sync + Clone + 'static),
     ) -> Self {
-        let entity = rctx.world.spawn_empty().id();
-        let mut derived = CalcFunction::new(entity, input_deps, derive_fn);
-        derived.execute(&mut rctx.world, &mut Vec::new());
-        rctx.world.entity_mut(entity).insert(derived);
+        let entity = rctx.reactive_state.spawn_empty().id();
+        let mut derived = RxMemo::new(entity, input_deps, derive_fn);
+        derived.execute(&mut rctx.reactive_state, &mut Vec::new());
+        rctx.reactive_state.entity_mut(entity).insert(derived);
         Self {
             reactor_entity: entity,
             p: PhantomData,
@@ -45,7 +46,7 @@ impl<T: PartialEq + Send + Sync> Calc<T> {
     }
 
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
-        rctx.world
+        rctx.reactive_state
             .get::<ObservableData<T>>(self.reactor_entity)
             .unwrap()
             .data()
@@ -55,21 +56,21 @@ impl<T: PartialEq + Send + Sync> Calc<T> {
 /// Lives alongside the observable component. This holds a system that can be called without the
 /// caller knowing any type information, and will update the associated observable component.
 ///
-/// This component lives in the reactive world and holds the user calculation function. [`Derived`]
+/// This component lives in the reactive world and holds the user calculation function. [`Memo`]
 /// is what users of this plugin use, which is a lightweight handle to access this mirror component.
 #[derive(Component)]
-pub(crate) struct CalcFunction {
+pub(crate) struct RxMemo {
     function: Box<dyn DeriveFn>,
 }
 
 trait DeriveFn: Send + Sync + FnMut(&mut World, &mut Vec<Entity>) {}
 impl<T: Send + Sync + FnMut(&mut World, &mut Vec<Entity>)> DeriveFn for T {}
 
-impl CalcFunction {
-    pub(crate) fn new<C: Send + Sync + PartialEq + 'static, D: CalcQuery<C> + 'static>(
+impl RxMemo {
+    pub(crate) fn new<C: Clone + Send + Sync + PartialEq + 'static, D: MemoQuery<C> + 'static>(
         entity: Entity,
         input_deps: D,
-        derive_fn: (impl Fn(D::Query<'_>) -> C + Send + Sync + Clone + 'static),
+        derive_fn: (impl Fn(D::Query<'_>) -> C + Clone + Send + Sync + 'static),
     ) -> Self {
         let function = move |world: &mut World, stack: &mut Vec<Entity>| {
             let computed_value = D::read_and_derive(world, entity, derive_fn.clone(), input_deps);
@@ -87,7 +88,7 @@ impl CalcFunction {
 }
 
 /// Implemented on tuples to be used for querying
-pub trait CalcQuery<T>: Copy + Send + Sync + 'static {
+pub trait MemoQuery<T>: Copy + Send + Sync + 'static {
     type Query<'a>;
     fn read_and_derive(
         world: &mut World,
@@ -99,7 +100,7 @@ pub trait CalcQuery<T>: Copy + Send + Sync + 'static {
 
 macro_rules! impl_CalcQuery {
     ($N: expr, $(($T: ident, $I: ident)),*) => {
-        impl<$($T: Observable), *, D> CalcQuery<D> for ($($T,)*) {
+        impl<$($T: Observable), *, D> MemoQuery<D> for ($($T,)*) {
             type Query<'a> = ($(&'a $T::DataType,)*);
 
             fn read_and_derive(

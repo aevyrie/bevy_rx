@@ -15,19 +15,19 @@
 use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::{prelude::*, system::SystemParam};
-use calculation::CalcQuery;
+use memo::MemoQuery;
 use observable::{Observable, ObservableData};
-use prelude::Calc;
+use prelude::Memo;
 use signal::Signal;
 
-pub mod calculation;
-pub mod callback;
+pub mod effect;
+pub mod memo;
 pub mod observable;
 pub mod signal;
 
 pub mod prelude {
     pub use crate::{
-        calculation::Calc, signal::Signal, ReactiveContext, ReactiveExtensionsPlugin, Reactor,
+        memo::Memo, signal::Signal, ReactiveContext, ReactiveExtensionsPlugin, Reactor,
     };
 }
 
@@ -58,7 +58,7 @@ impl<'w> DerefMut for Reactor<'w> {
 /// typed data in a type erased container.
 #[derive(Default, Resource)]
 pub struct ReactiveContext {
-    world: World,
+    reactive_state: World,
 }
 
 impl ReactiveContext {
@@ -70,7 +70,7 @@ impl ReactiveContext {
     ) -> &T {
         // get the obs data from the world
         // add the reader to the obs data's subs
-        self.world
+        self.reactive_state
             .get::<ObservableData<T>>(observable.reactive_entity())
             .unwrap()
             .data()
@@ -81,31 +81,34 @@ impl ReactiveContext {
     /// Potentially expensive operation that will write a value to this [`Signal`]`. This will cause
     /// all reactive subscribers of this observable to recompute their own values, which can cause
     /// all of its subscribers to recompute, etc.
-    pub fn send_signal<T: Send + Sync + PartialEq + 'static>(
+    pub fn send_signal<T: Clone + Send + Sync + PartialEq + 'static>(
         &mut self,
         signal: Signal<T>,
         value: T,
     ) {
-        ObservableData::send_signal(&mut self.world, signal.reactive_entity(), value)
+        ObservableData::send_signal(&mut self.reactive_state, signal.reactive_entity(), value)
     }
 
-    pub fn signal<T: Send + Sync + PartialEq + 'static>(&mut self, initial_value: T) -> Signal<T> {
+    pub fn new_signal<T: Clone + Send + Sync + PartialEq + 'static>(
+        &mut self,
+        initial_value: T,
+    ) -> Signal<T> {
         Signal::new(self, initial_value)
     }
 
-    pub fn calc<T: Send + Sync + PartialEq + 'static, C: CalcQuery<T> + 'static>(
+    pub fn new_memo<T: Clone + Send + Sync + PartialEq + 'static, C: MemoQuery<T> + 'static>(
         &mut self,
         calculation_query: C,
         derive_fn: (impl Fn(C::Query<'_>) -> T + Send + Sync + Clone + 'static),
-    ) -> Calc<T> {
-        Calc::new(self, calculation_query, derive_fn)
+    ) -> Memo<T> {
+        Memo::new(self, calculation_query, derive_fn)
     }
 }
 
 mod test {
     #[test]
     fn basic() {
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         struct Button {
             active: bool,
         }
@@ -114,7 +117,7 @@ mod test {
             pub const ON: Self = Button { active: true };
         }
 
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         struct Lock {
             unlocked: bool,
         }
@@ -130,13 +133,13 @@ mod test {
 
         let mut reactor = crate::ReactiveContext::default();
 
-        let button1 = reactor.signal(Button::OFF);
-        let button2 = reactor.signal(Button::OFF);
-        let lock1 = reactor.calc((button1, button2), &Lock::two_buttons);
+        let button1 = reactor.new_signal(Button::OFF);
+        let button2 = reactor.new_signal(Button::OFF);
+        let lock1 = reactor.new_memo((button1, button2), &Lock::two_buttons);
         assert!(!reactor.read(lock1).unlocked);
 
-        let button3 = reactor.signal(Button::OFF);
-        let lock2 = reactor.calc((button1, button3), &Lock::two_buttons);
+        let button3 = reactor.new_signal(Button::OFF);
+        let lock2 = reactor.new_memo((button1, button3), &Lock::two_buttons);
         assert!(!reactor.read(lock2).unlocked);
 
         reactor.send_signal(button1, Button::ON); // Automatically recomputes lock1 & lock2!
@@ -156,34 +159,34 @@ mod test {
 
         let add = |n: (&f32, &f32)| n.0 + n.1;
 
-        let n1 = reactor.signal(1.0);
-        let n2 = reactor.signal(10.0);
-        let n3 = reactor.signal(100.0);
+        let n1 = reactor.new_signal(1.0);
+        let n2 = reactor.new_signal(10.0);
+        let n3 = reactor.new_signal(100.0);
 
         // The following derives use signals as inputs
-        let d1 = reactor.calc((n1, n2), add); // 1 + 10
-        let d2 = reactor.calc((n3, n2), add); // 100 + 10
+        let d1 = reactor.new_memo((n1, n2), add); // 1 + 10
+        let d2 = reactor.new_memo((n3, n2), add); // 100 + 10
 
         // This derive uses other derives as inputs
-        let d3 = reactor.calc((d1, d2), add); // 11 + 110
+        let d3 = reactor.new_memo((d1, d2), add); // 11 + 110
         assert_eq!(*reactor.read(d3), 121.0);
     }
 
     #[test]
     fn many_types() {
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         struct Foo(f32);
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         struct Bar(f32);
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, PartialEq)]
         struct Baz(f32);
 
         let mut reactor = crate::ReactiveContext::default();
 
-        let foo = reactor.signal(Foo(1.0));
-        let bar = reactor.signal(Bar(1.0));
+        let foo = reactor.new_signal(Foo(1.0));
+        let bar = reactor.new_signal(Bar(1.0));
 
-        let baz = reactor.calc((foo, bar), |(foo, bar)| Baz(foo.0 + bar.0));
+        let baz = reactor.new_memo((foo, bar), |(foo, bar)| Baz(foo.0 + bar.0));
 
         assert_eq!(reactor.read(baz), &Baz(2.0));
     }
@@ -204,14 +207,14 @@ mod test {
 
         let start = bevy_utils::Instant::now();
         // Initial values
-        let k_0 = reactor.signal(0.0);
-        let iter_0 = reactor.signal(0.0);
+        let k_0 = reactor.new_signal(0.0);
+        let iter_0 = reactor.new_signal(0.0);
         // Scratch space handles to build graph
-        let mut iteration = reactor.calc((k_0, iter_0), bailey_borwein_plouffe);
-        let mut k = reactor.calc((k_0,), increment);
+        let mut iteration = reactor.new_memo((k_0, iter_0), bailey_borwein_plouffe);
+        let mut k = reactor.new_memo((k_0,), increment);
         for _ in 0..100_000_000 {
-            iteration = reactor.calc((k, iteration), bailey_borwein_plouffe);
-            k = reactor.calc((k,), increment);
+            iteration = reactor.new_memo((k, iteration), bailey_borwein_plouffe);
+            k = reactor.new_memo((k,), increment);
         }
         println!(
             "({:#?}) PI: {:.32}",

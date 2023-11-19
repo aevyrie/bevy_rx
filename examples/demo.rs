@@ -19,7 +19,7 @@ struct Button {
 
 #[derive(Debug, Component, Clone, Copy)]
 struct Lock {
-    unlocked: Calc<bool>,
+    unlocked: Memo<bool>,
 }
 
 impl Lock {
@@ -31,13 +31,13 @@ impl Lock {
 
 fn setup(mut commands: Commands, mut reactor: Reactor) {
     let button1 = Button {
-        active: reactor.signal(false),
+        active: reactor.new_signal(false),
     };
     let button2 = Button {
-        active: reactor.signal(false),
+        active: reactor.new_signal(false),
     };
     let lock = Lock {
-        unlocked: reactor.calc((button1.active, button2.active), Lock::two_buttons),
+        unlocked: reactor.new_memo((button1.active, button2.active), Lock::two_buttons),
     };
     commands.spawn(lock);
     commands.spawn(button1);
@@ -75,9 +75,9 @@ fn update(mut reactor: Reactor, buttons: Query<&Button>, lock: Query<&Lock>) {
         start.elapsed() / 1_000_000
     );
 
-    let local_signal = reactor.signal(false); // We can add a new signal locally
+    let local_signal = reactor.new_signal(false); // We can add a new signal locally
 
-    let lock2 = reactor.calc((button1.active, local_signal), Lock::two_buttons); // Local and ECS
+    let lock2 = reactor.new_memo((button1.active, local_signal), Lock::two_buttons); // Local and ECS
     reactor.send_signal(local_signal, true);
     let start = Instant::now();
     for _ in 0..1_000_000 {
