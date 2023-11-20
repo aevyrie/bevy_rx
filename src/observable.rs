@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::{
-    effect::{RxDeferredEffects, RxEffect},
+    effect::{RxDeferredEffect, RxDeferredEffects},
     ReactiveContext,
 };
 
@@ -15,12 +15,12 @@ pub trait Observable: Copy + Send + Sync + 'static {
 /// The core reactive primitive that holds data, and a list of subscribers that are invoked when the
 /// data changes.
 #[derive(Component)]
-pub(crate) struct ObservableData<T> {
+pub(crate) struct RxObservableData<T> {
     pub data: T,
     pub subscribers: Vec<Entity>,
 }
 
-impl<T: Send + Sync + 'static> ObservableData<T> {
+impl<T: Send + Sync + 'static> RxObservableData<T> {
     #[allow(clippy::new_ret_no_self)]
     pub(crate) fn new(rctx: &mut ReactiveContext, data: T) -> Entity {
         rctx.reactive_state
@@ -40,10 +40,15 @@ impl<T: Send + Sync + 'static> ObservableData<T> {
     }
 }
 
-impl<T: Clone + PartialEq + Send + Sync + 'static> ObservableData<T> {
+impl<T: Clone + PartialEq + Send + Sync + 'static> RxObservableData<T> {
     /// Update the reactive value, and push subscribers onto the stack.
-    pub fn update_value(world: &mut World, stack: &mut Vec<Entity>, observable: Entity, value: T) {
-        if let Some(mut reactive) = world.get_mut::<ObservableData<T>>(observable) {
+    pub fn update_value(
+        rx_world: &mut World,
+        stack: &mut Vec<Entity>,
+        observable: Entity,
+        value: T,
+    ) {
+        if let Some(mut reactive) = rx_world.get_mut::<RxObservableData<T>>(observable) {
             if reactive.data == value {
                 return; // Diff the value and early exit if no change.
             }
@@ -57,28 +62,15 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> ObservableData<T> {
             // overflow.
             stack.append(&mut reactive.subscribers);
         } else {
-            world.entity_mut(observable).insert(ObservableData {
+            rx_world.entity_mut(observable).insert(RxObservableData {
                 data: value.clone(),
                 subscribers: Default::default(),
             });
         }
-
-        // Maybe effects should just return a value somehow??? Or maybe you set up an effect with a callback in the main world, and it is linked the opposite direction?
-        // The effect stack could be a bunch of fns that accept world, and inside you inject the new value, along with the code to look up and execute the callback that lives in the main world?? Maybe the effect is a free-floating entity in the main world, so we can store as many callbacks as you want.
-
-        if let Some(mut effect) = world.get_mut::<RxEffect<T>>(observable) {
-            let value = value.clone();
-            let observable = observable;
-
-            // tricky - which world is which? The effects should operate on the main world, but usually everything in this code is for the rx world.
-            let effect = Box::new(|world: &mut World| {
-                let Some(mut effect) = world.get_mut::<RxEffect<T>>(observable) else {
-                    return;
-                };
-                effect.system.run(world, value);
-            });
-            let stack = &mut world.resource_mut::<RxDeferredEffects>().stack;
-            stack.push(effect);
+        if rx_world.get_mut::<RxDeferredEffect>(observable).is_some() {
+            rx_world
+                .resource_mut::<RxDeferredEffects>()
+                .push::<T>(observable);
         }
     }
     /// Update value of this reactive entity, additionally, trigger all subscribers. The

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy_ecs::prelude::*;
 use bevy_utils::all_tuples_with_size;
 
-use crate::{Observable, ObservableData, ReactiveContext};
+use crate::{Observable, ReactiveContext, RxObservableData};
 
 /// A reactive value that is automatically recalculated and memoized (cached).
 ///
@@ -47,17 +47,21 @@ impl<T: Clone + PartialEq + Send + Sync> Memo<T> {
 
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         rctx.reactive_state
-            .get::<ObservableData<T>>(self.reactor_entity)
+            .get::<RxObservableData<T>>(self.reactor_entity)
             .unwrap()
             .data()
     }
 }
 
-/// Lives alongside the observable component. This holds a system that can be called without the
-/// caller knowing any type information, and will update the associated observable component.
+/// A reactive calculation that is run on observable data, and memoized (cached).
 ///
-/// This component lives in the reactive world and holds the user calculation function. [`Memo`]
-/// is what users of this plugin use, which is a lightweight handle to access this mirror component.
+/// This component lives in the reactive world and holds the user calculation function. [`Memo`] is
+/// the user-facing counterpart in the main world, which is a lightweight handle to access this
+/// mirror component.
+///
+/// This component is expected to be on an entity with an [`crate::RxObservableData`] component. The
+/// contained function can be called without the caller knowing any type information, and will
+/// update the associated [`RxObservableData`] component.
 #[derive(Component)]
 pub(crate) struct RxMemo {
     function: Box<dyn DeriveFn>,
@@ -75,7 +79,7 @@ impl RxMemo {
         let function = move |world: &mut World, stack: &mut Vec<Entity>| {
             let computed_value = D::read_and_derive(world, entity, derive_fn.clone(), input_deps);
             if let Some(computed_value) = computed_value {
-                ObservableData::update_value(world, stack, entity, computed_value);
+                RxObservableData::update_value(world, stack, entity, computed_value);
             }
         };
         let function = Box::new(function);
@@ -117,10 +121,10 @@ macro_rules! impl_CalcQuery {
                 // harder-to-debug errors down the line.
                 let [$(mut $I,)*] = world.get_many_entities_mut(entities).unwrap();
 
-                $($I.get_mut::<ObservableData<$T::DataType>>()?.subscribe(reader);)*
+                $($I.get_mut::<RxObservableData<$T::DataType>>()?.subscribe(reader);)*
 
                 Some(derive_fn((
-                    $($I.get::<ObservableData<$T::DataType>>()?.data(),)*
+                    $($I.get::<RxObservableData<$T::DataType>>()?.data(),)*
                 )))
             }
         }

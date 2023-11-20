@@ -14,9 +14,11 @@
 /// propagation or component mutation.
 use std::ops::{Deref, DerefMut};
 
+use bevy_app::PostUpdate;
 use bevy_ecs::{prelude::*, system::SystemParam};
+use effect::{Effect, RxDeferredEffect, RxDeferredEffects};
 use memo::MemoQuery;
-use observable::{Observable, ObservableData};
+use observable::{Observable, RxObservableData};
 use prelude::Memo;
 use signal::Signal;
 
@@ -32,9 +34,27 @@ pub mod prelude {
 }
 
 pub struct ReactiveExtensionsPlugin;
+
+impl ReactiveExtensionsPlugin {
+    fn apply_deferred_effects(world: &mut World) {
+        world.resource_scope::<ReactiveContext, _>(|world, mut rctx| {
+            let mut effects: Vec<_> = std::mem::take(
+                rctx.reactive_state
+                    .resource_mut::<RxDeferredEffects>()
+                    .stack
+                    .as_mut(),
+            );
+            for effect in effects.drain(..) {
+                effect(world, &mut rctx.reactive_state)
+            }
+        })
+    }
+}
+
 impl bevy_app::Plugin for ReactiveExtensionsPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<ReactiveContext>();
+        app.init_resource::<ReactiveContext>()
+            .add_systems(PostUpdate, Self::apply_deferred_effects);
     }
 }
 
@@ -56,9 +76,19 @@ impl<'w> DerefMut for Reactor<'w> {
 
 /// Contains all reactive state. A bevy world is used because it makes it easy to store statically
 /// typed data in a type erased container.
-#[derive(Default, Resource)]
+#[derive(Resource)]
 pub struct ReactiveContext {
     reactive_state: World,
+}
+
+impl Default for ReactiveContext {
+    fn default() -> Self {
+        let mut world = World::default();
+        world.init_resource::<RxDeferredEffects>();
+        Self {
+            reactive_state: world,
+        }
+    }
 }
 
 impl ReactiveContext {
@@ -71,7 +101,7 @@ impl ReactiveContext {
         // get the obs data from the world
         // add the reader to the obs data's subs
         self.reactive_state
-            .get::<ObservableData<T>>(observable.reactive_entity())
+            .get::<RxObservableData<T>>(observable.reactive_entity())
             .unwrap()
             .data()
     }
@@ -86,7 +116,7 @@ impl ReactiveContext {
         signal: Signal<T>,
         value: T,
     ) {
-        ObservableData::send_signal(&mut self.reactive_state, signal.reactive_entity(), value)
+        RxObservableData::send_signal(&mut self.reactive_state, signal.reactive_entity(), value)
     }
 
     pub fn new_signal<T: Clone + Send + Sync + PartialEq + 'static>(
@@ -102,6 +132,20 @@ impl ReactiveContext {
         derive_fn: (impl Fn(C::Query<'_>) -> T + Send + Sync + Clone + 'static),
     ) -> Memo<T> {
         Memo::new(self, calculation_query, derive_fn)
+    }
+
+    pub fn new_deferred_effect<M>(
+        &mut self,
+        observable: impl Observable,
+        effect_system: impl IntoSystem<(), (), M>,
+    ) -> Effect {
+        Effect::new_deferred(self, observable, effect_system)
+    }
+
+    pub fn effect_system(&self, effect: Effect) -> Option<&dyn System<In = (), Out = ()>> {
+        self.reactive_state
+            .get::<RxDeferredEffect>(effect.reactor_entity)
+            .and_then(|effect| effect.system())
     }
 }
 

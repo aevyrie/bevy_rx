@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use bevy_ecs::prelude::*;
 
-use crate::{observable::ObservableData, Observable, ReactiveContext};
+use crate::{observable::RxObservableData, Observable, ReactiveContext};
 
 /// A reactive component that can updated with new values or read through the [`ReactiveContext`].
 #[derive(Debug, Component)]
@@ -29,14 +29,14 @@ impl<T: Send + Sync + PartialEq> Copy for Signal<T> {}
 impl<T: Clone + Send + Sync + PartialEq> Signal<T> {
     pub(crate) fn new(rctx: &mut ReactiveContext, initial_value: T) -> Self {
         Self {
-            reactor_entity: ObservableData::new(rctx, initial_value),
+            reactor_entity: RxObservableData::new(rctx, initial_value),
             p: PhantomData,
         }
     }
 
     pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
         rctx.reactive_state
-            .get::<ObservableData<T>>(self.reactor_entity)
+            .get::<RxObservableData<T>>(self.reactor_entity)
             .unwrap()
             .data()
     }
@@ -44,6 +44,6 @@ impl<T: Clone + Send + Sync + PartialEq> Signal<T> {
     /// See [`ReactiveContext::send_signal`].
     #[inline]
     pub fn send(&self, rctx: &mut ReactiveContext, value: T) {
-        ObservableData::send_signal(&mut rctx.reactive_state, self.reactor_entity, value)
+        RxObservableData::send_signal(&mut rctx.reactive_state, self.reactor_entity, value)
     }
 }

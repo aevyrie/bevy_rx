@@ -1,3 +1,6 @@
+use bevy_ecs::system::Res;
+use bevy_rx::effect::EffectData;
+
 fn main() {
     let mut reactor = bevy_rx::ReactiveContext::default();
 
@@ -14,19 +17,17 @@ fn main() {
     // We can also define the calculation as a function
     let welcome = reactor.new_memo((full_name, age), welcome_message);
 
-    assert_eq!(
-        dbg!(reactor.read(welcome)),
-        "Welcome Jane Doe, you are 45 years old."
-    );
+    let effect = reactor.new_deferred_effect(welcome, print_welcome);
+
+    dbg!(reactor.effect_system(effect).unwrap().name());
 
     reactor.send_signal(first_name, "Katie".to_string());
-
-    assert_eq!(
-        dbg!(reactor.read(welcome)),
-        "Welcome Katie Doe, you are 45 years old."
-    );
 }
 
 fn welcome_message((name, age): (&String, &i32)) -> String {
     format!("Welcome {name}, you are {age} years old.")
+}
+
+fn print_welcome(data: Res<EffectData<String>>) {
+    println!("{}", **data);
 }
