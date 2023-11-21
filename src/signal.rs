@@ -27,14 +27,14 @@ impl<T: Send + Sync + PartialEq> Clone for Signal<T> {
 impl<T: Send + Sync + PartialEq> Copy for Signal<T> {}
 
 impl<T: Clone + Send + Sync + PartialEq> Signal<T> {
-    pub(crate) fn new(rctx: &mut ReactiveContext, initial_value: T) -> Self {
+    pub(crate) fn new<S>(rctx: &mut ReactiveContext<S>, initial_value: T) -> Self {
         Self {
             reactor_entity: RxObservableData::new(rctx, initial_value),
             p: PhantomData,
         }
     }
 
-    pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
+    pub fn read<'r, S>(&self, rctx: &'r mut ReactiveContext<S>) -> &'r T {
         rctx.reactive_state
             .get::<RxObservableData<T>>(self.reactor_entity)
             .unwrap()
@@ -43,7 +43,7 @@ impl<T: Clone + Send + Sync + PartialEq> Signal<T> {
 
     /// See [`ReactiveContext::send_signal`].
     #[inline]
-    pub fn send(&self, rctx: &mut ReactiveContext, value: T) {
+    pub fn send<S>(&self, rctx: &mut ReactiveContext<S>, value: T) {
         RxObservableData::send_signal(&mut rctx.reactive_state, self.reactor_entity, value)
     }
 }

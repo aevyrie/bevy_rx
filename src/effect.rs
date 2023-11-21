@@ -13,8 +13,8 @@ pub struct Effect {
 }
 
 impl Effect {
-    pub fn new_deferred<M>(
-        rctx: &mut ReactiveContext,
+    pub fn new_deferred<M, S>(
+        rctx: &mut ReactiveContext<S>,
         observable: impl Observable,
         effect_system: impl IntoSystem<(), (), M>,
     ) -> Self {
@@ -26,9 +26,9 @@ impl Effect {
         Self { reactor_entity }
     }
 
-    pub fn get<'r>(
+    pub fn get<'r, S>(
         &self,
-        rctx: &'r mut ReactiveContext,
+        rctx: &'r mut ReactiveContext<S>,
     ) -> Option<&'r dyn System<In = (), Out = ()>> {
         rctx.reactive_state
             .get::<RxDeferredEffect>(self.reactor_entity)

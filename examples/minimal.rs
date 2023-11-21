@@ -1,8 +1,10 @@
 use bevy_ecs::system::Res;
 use bevy_rx::effect::EffectData;
 
+struct MyState(usize);
+
 fn main() {
-    let mut reactor = bevy_rx::ReactiveContext::default();
+    let mut reactor = bevy_rx::ReactiveContext::<MyState>::default();
 
     // Signals are statically typed values that can be observed by calculations or effects.
     let first_name = reactor.new_signal("Jane".to_string());

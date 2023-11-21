@@ -22,7 +22,7 @@ pub(crate) struct RxObservableData<T> {
 
 impl<T: Send + Sync + 'static> RxObservableData<T> {
     #[allow(clippy::new_ret_no_self)]
-    pub(crate) fn new(rctx: &mut ReactiveContext, data: T) -> Entity {
+    pub(crate) fn new<S>(rctx: &mut ReactiveContext<S>, data: T) -> Entity {
         rctx.reactive_state
             .spawn(Self {
                 data,

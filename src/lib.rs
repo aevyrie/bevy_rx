@@ -12,7 +12,10 @@
 /// This makes it possible to define a complex network of signals, derived values, and effects, and
 /// execute them reactively to completion without worrying about frame delays seen with event
 /// propagation or component mutation.
-use std::ops::{Deref, DerefMut};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use bevy_app::PostUpdate;
 use bevy_ecs::{prelude::*, system::SystemParam};
@@ -37,7 +40,7 @@ pub struct ReactiveExtensionsPlugin;
 
 impl ReactiveExtensionsPlugin {
     fn apply_deferred_effects(world: &mut World) {
-        world.resource_scope::<ReactiveContext, _>(|world, mut rctx| {
+        world.resource_scope::<ReactiveContext<World>, _>(|world, mut rctx| {
             let mut effects: Vec<_> = std::mem::take(
                 rctx.reactive_state
                     .resource_mut::<RxDeferredEffects>()
@@ -53,16 +56,16 @@ impl ReactiveExtensionsPlugin {
 
 impl bevy_app::Plugin for ReactiveExtensionsPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<ReactiveContext>()
+        app.init_resource::<ReactiveContext<World>>()
             .add_systems(PostUpdate, Self::apply_deferred_effects);
     }
 }
 
 /// A system param to make accessing the [`ReactiveContext`] less verbose.
 #[derive(SystemParam)]
-pub struct Reactor<'w>(ResMut<'w, ReactiveContext>);
+pub struct Reactor<'w>(ResMut<'w, ReactiveContext<World>>);
 impl<'w> Deref for Reactor<'w> {
-    type Target = ReactiveContext;
+    type Target = ReactiveContext<World>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -77,21 +80,23 @@ impl<'w> DerefMut for Reactor<'w> {
 /// Contains all reactive state. A bevy world is used because it makes it easy to store statically
 /// typed data in a type erased container.
 #[derive(Resource)]
-pub struct ReactiveContext {
+pub struct ReactiveContext<S> {
     reactive_state: World,
+    outside_state: PhantomData<S>,
 }
 
-impl Default for ReactiveContext {
+impl<S> Default for ReactiveContext<S> {
     fn default() -> Self {
         let mut world = World::default();
         world.init_resource::<RxDeferredEffects>();
         Self {
             reactive_state: world,
+            outside_state: PhantomData,
         }
     }
 }
 
-impl ReactiveContext {
+impl<S> ReactiveContext<S> {
     /// Returns a reference to the current value of the provided observable. The observable is any
     /// reactive handle that has a value, like a [`Signal`] or a [`Derived`].
     pub fn read<T: Send + Sync + PartialEq + 'static, O: Observable<DataType = T>>(
@@ -175,7 +180,7 @@ mod test {
             }
         }
 
-        let mut reactor = crate::ReactiveContext::default();
+        let mut reactor = crate::ReactiveContext::<()>::default();
 
         let button1 = reactor.new_signal(Button::OFF);
         let button2 = reactor.new_signal(Button::OFF);
@@ -199,7 +204,7 @@ mod test {
 
     #[test]
     fn nested_derive() {
-        let mut reactor = crate::ReactiveContext::default();
+        let mut reactor = crate::ReactiveContext::<()>::default();
 
         let add = |n: (&f32, &f32)| n.0 + n.1;
 
@@ -225,7 +230,7 @@ mod test {
         #[derive(Debug, Clone, PartialEq)]
         struct Baz(f32);
 
-        let mut reactor = crate::ReactiveContext::default();
+        let mut reactor = crate::ReactiveContext::<()>::default();
 
         let foo = reactor.new_signal(Foo(1.0));
         let bar = reactor.new_signal(Bar(1.0));
@@ -237,7 +242,7 @@ mod test {
 
     #[test]
     fn calculate_pi() {
-        let mut reactor = crate::ReactiveContext::default();
+        let mut reactor = crate::ReactiveContext::<()>::default();
 
         let increment = |(n,): (&f64,)| n + 1.0;
         let bailey_borwein_plouffe = |(k, last_value): (&f64, &f64)| {
@@ -256,7 +261,7 @@ mod test {
         // Scratch space handles to build graph
         let mut iteration = reactor.new_memo((k_0, iter_0), bailey_borwein_plouffe);
         let mut k = reactor.new_memo((k_0,), increment);
-        for _ in 0..100_000_000 {
+        for _ in 0..1_000_000 {
             iteration = reactor.new_memo((k, iteration), bailey_borwein_plouffe);
             k = reactor.new_memo((k,), increment);
         }

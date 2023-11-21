@@ -30,8 +30,8 @@ impl<T: Send + Sync> Clone for Memo<T> {
 impl<T: Send + Sync> Copy for Memo<T> {}
 
 impl<T: Clone + PartialEq + Send + Sync> Memo<T> {
-    pub fn new<D: MemoQuery<T>>(
-        rctx: &mut ReactiveContext,
+    pub fn new<S, D: MemoQuery<T>>(
+        rctx: &mut ReactiveContext<S>,
         input_deps: D,
         derive_fn: (impl Fn(D::Query<'_>) -> T + Send + Sync + Clone + 'static),
     ) -> Self {
@@ -45,7 +45,7 @@ impl<T: Clone + PartialEq + Send + Sync> Memo<T> {
         }
     }
 
-    pub fn read<'r>(&self, rctx: &'r mut ReactiveContext) -> &'r T {
+    pub fn read<'r, S>(&self, rctx: &'r mut ReactiveContext<S>) -> &'r T {
         rctx.reactive_state
             .get::<RxObservableData<T>>(self.reactor_entity)
             .unwrap()
